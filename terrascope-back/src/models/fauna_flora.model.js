@@ -1,52 +1,51 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose" ;
 
 //models fauna_flora
 
-const fauna_flora = new mongoose.Schema({
+const faunaFloraSchema = new mongoose.Schema({
     nombre_comun: {
         type: String,
-        require: true
+        required: true
     },
     nombre_cientifico: {
         type: String,
-        requiere: true
+        required: true
     },
     especie: {
         type: String,
-        requiere: true
+        required: true
     },
     descripcion: {
         type: String,
-        requiere: true
+        required: true
     },
     imagen: {
         type: String,
-        require: true //almacena base64
+        required: true //almacena base64
     },
-    ubicacion: {
-        latitud: { type: Number, require: true },
-        longitud: { type: Number, require: true }
-
-
+   ubicacion: {
+    latitud: { type: Number, required: true },
+    longitud: { type: Number, required: true }
     },
     comportamiento: {
         type: String,
-        requiere: true
+        required: true
     },
-    estado_extincion: { type: String, requiere: true },
-    estado_especimen: { type: String, requiere: true },
-    habitatA: {
-        id_habitat: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
-        nombre_habitat: { type: String, requiere: true },
-        descripcion_habitat: { type: String, requiere: true }
-
-    },
-    comentarios:{
-        id_usuario:{type: mongoose.Schema.Types.ObjectId, ref: "usuarios"},
-        nombre_usuario:{type: String, require:true},
-        comentario:{type:String,requiere: true},
-        fecha:{type:Date, requiere: true}
-    }
+    estado_extincion: { type: String, required: true },
+    estado_especimen: { type: String, required: true },
+   habitad: {
+  id_habitad: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
+  nombre_habitad: { type: String },
+  descripcion_habitat: { type: String }
+   },
+    comentarios: [{
+    id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios" },
+    nombre_usuario: { type: String, required: true },
+    comentario: { type: String, required: true },
+    fecha: { type: Date, required: true }
+}]
 
 
 })
+const fauna_flora = mongoose.model("FaunaFlora", faunaFloraSchema, "fauna_flora");
+export default fauna_flora;
