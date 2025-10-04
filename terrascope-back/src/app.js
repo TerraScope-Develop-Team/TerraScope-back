@@ -2,30 +2,20 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import "./config/db.js"; // Conectar a la base de datos
+import habitatRoutes from "./routes/habitat.routes.js";
 
 const app = express();
+
 
 // Middlewares
 app.use(cors());
 app.use(morgan("dev"));
 app.use(express.json());
 
-// Ruta de prueba
-app.get("/", (req, res) => {
-  res.json({ 
-    message: "¡TerraScope Backend funcionando!",
-    status: "OK"
-  });
-});
+// Rutas
+app.use("/api/habitats", habitatRoutes);
 
-// Ruta de salud
-app.get("/health", (req, res) => {
-  res.json({ 
-    status: "OK",
-    database: "Connected", 
-    environment: process.env.NODE_ENV || "development"
-  });
-});
+
 
 // Manejo de errores
 app.use((err, req, res, next) => {
