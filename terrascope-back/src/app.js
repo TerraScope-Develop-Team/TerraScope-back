@@ -3,6 +3,8 @@ import cors from "cors";
 import morgan from "morgan";
 import "./config/db.js"; // Conectar a la base de datos
 import habitatRoutes from "./routes/habitat.routes.js";
+import usuarioRoutes from "./routes/usuario.routes.js";
+
 
 const app = express();
 
@@ -14,7 +16,7 @@ app.use(express.json());
 
 // Rutas
 app.use("/api/habitats", habitatRoutes);
-
+app.use("/api/usuarios", usuarioRoutes);
 
 
 // Manejo de errores
