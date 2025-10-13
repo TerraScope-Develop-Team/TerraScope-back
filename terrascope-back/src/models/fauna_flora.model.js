@@ -23,6 +23,14 @@ const faunaFloraSchema = new mongoose.Schema({
         type: String,
         required: true //almacena base64
     },
+    tipo:{
+        type:String,
+        required:true
+    },
+    nombre_usuario:{
+        type:String,
+        required:true
+    },
    ubicacion: {
     latitud: { type: Number, required: true },
     longitud: { type: Number, required: true }

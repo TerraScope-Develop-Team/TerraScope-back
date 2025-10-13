@@ -22,7 +22,9 @@ export const createAvistamiento = async (req, res) => {
       comportamiento,
       estado_extincion,
       estado_especimen,
-      habitad
+      habitad,
+      tipo,
+      nombre_usuario
     });
 
     await nuevoAvistamiento.save();
