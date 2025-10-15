@@ -47,7 +47,7 @@ const faunaFloraSchema = new mongoose.Schema({
   descripcion_habitat: { type: String }
    },
     comentarios: [{
-    id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios" },
+    id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios", required: false  },
     nombre_usuario: { type: String, required: true },
     comentario: { type: String, required: true },
     fecha: { type: Date, required: true }
