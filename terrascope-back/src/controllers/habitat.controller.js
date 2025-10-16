@@ -7,17 +7,17 @@ import Habitat from "../models/habitat.model.js";
 // Crear un nuevo hábitat
 export const createHabitat = async (req, res) => {
   try {
-    const { nombre_habitad, descripcion_habitad } = req.body;
+    const { nombre_habitat, descripcion_habitat } = req.body;
 
-    if (!nombre_habitad || !descripcion_habitad) {
+    if (!nombre_habitat || !descripcion_habitat) {
       return res.status(400).json({
         message: "Nombre y descripción del hábitat son requeridos"
       });
     }
 
     const newHabitat = new Habitat({
-      nombre_habitad,
-      descripcion_habitad
+      nombre_habitat,
+      descripcion_habitat
     });
 
     const savedHabitat = await newHabitat.save();

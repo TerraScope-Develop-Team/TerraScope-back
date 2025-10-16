@@ -5,12 +5,12 @@ import mongoose from "mongoose";
 // Descripción: Modelo de datos para hábitats
 
 const habitatSchema = new mongoose.Schema({
-  nombre_habitad: {
+  nombre_habitat: {
     type: String,
     required: true,
     trim: true
   },
-  descripcion_habitad: {
+  descripcion_habitat: {
     type: String,
     required: true,
     trim: true
