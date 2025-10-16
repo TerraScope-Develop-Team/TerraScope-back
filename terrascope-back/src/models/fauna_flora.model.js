@@ -1,4 +1,4 @@
-import mongoose from "mongoose" ;
+import mongoose from "mongoose";
 
 //models fauna_flora
 
@@ -23,17 +23,9 @@ const faunaFloraSchema = new mongoose.Schema({
         type: String,
         required: true //almacena base64
     },
-    tipo:{
-        type:String,
-        required:true
-    },
-    nombre_usuario:{
-        type:String,
-        required:true
-    },
-   ubicacion: {
-    latitud: { type: Number, required: true },
-    longitud: { type: Number, required: true }
+    ubicacion: {
+        latitud: { type: Number, required: true },
+        longitud: { type: Number, required: true }
     },
     comportamiento: {
         type: String,
@@ -41,19 +33,43 @@ const faunaFloraSchema = new mongoose.Schema({
     },
     estado_extincion: { type: String, required: true },
     estado_especimen: { type: String, required: true },
-   habitad: {
-  id_habitad: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
-  nombre_habitad: { type: String },
-  descripcion_habitat: { type: String }
-   },
+    habitad: {
+        id_habitad: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
+        nombre_habitad: { type: String },
+        descripcion_habitat: { type: String }
+    },
     comentarios: [{
-    id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios", required: false  },
-    nombre_usuario: { type: String, required: true },
-    comentario: { type: String, required: true },
-    fecha: { type: Date, required: true }
-}]
+        id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios", required: false },
+        nombre_usuario: { type: String, required: true },
+        comentario: { type: String, required: true },
+        fecha: { type: Date, required: true }
+    }],
+    validacion: {
+        estado: {
+            type: String,
+            enum: ["pendiente", "validado_comunidad", "validado_experto"],
+            default: "pendiente",
+        },
+        votos_comunidad: {
+            type: Number,
+            default: 0,
+        },
+        requeridos_comunidad: {
+            type: Number,
+            default: 5,
+        },
+        usuarios_validadores: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "usuarios",
+            },
+        ],
+        validado_por_experto: {
+            type: Boolean,
+            default: false,
+        },
+    },
+});
 
-
-})
 const fauna_flora = mongoose.model("FaunaFlora", faunaFloraSchema, "fauna_flora");
 export default fauna_flora;
