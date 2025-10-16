@@ -88,15 +88,15 @@ export const addComentario = async (req, res) => {
       fecha: new Date()
     };
 
-    // Solo agregar id_usuario si existe y es un ObjectId válido
+    
     if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
-      // Validar que sea un ObjectId válido
+      
       if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
         nuevoComentario.id_usuario = id_usuario;
       }
     }
 
-    // Agregar el comentario
+   
     avistamiento.comentarios.push(nuevoComentario);
     
     await avistamiento.save();
@@ -112,7 +112,7 @@ export const addComentario = async (req, res) => {
 };
 
 
-// Eliminar avistamiento
+
 export const deleteAvistamiento = async (req, res) => {
   try {
     const avistamiento = await FaunaFlora.findByIdAndDelete(req.params.id);
@@ -123,10 +123,10 @@ export const deleteAvistamiento = async (req, res) => {
   }
 };
 
-// Obtener zonas frecuentes
+
 export const getFrequentZones = async (req, res) => {
   try {
-    // Aggregate to find frequent locations per especie
+   
     const frequentZones = await FaunaFlora.aggregate([
       {
         $group: {
