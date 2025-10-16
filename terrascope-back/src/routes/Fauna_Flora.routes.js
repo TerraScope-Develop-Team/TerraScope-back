@@ -7,7 +7,10 @@ import {
   getAvistamientoById,
   deleteAvistamiento,
   addComentario,
-  getFrequentZones
+  getFrequentZones,
+  votarValidacion,
+  validarPorExperto,
+  obtenerEstadoValidacion,
 } from "../controllers/fauna_flora.controller.js";
 
 // Autor: Leonel Torres
@@ -22,6 +25,11 @@ router.post("/", createAvistamiento);
 router.get("/", getAvistamientos);
 router.get("/:id", getAvistamientoById);
 router.delete("/:id", deleteAvistamiento);
+
+// Rutas para la validación de especies
+router.put("/:id/votar", votarValidacion);
+router.put("/:id/validar-experto", validarPorExperto);
+router.get("/:id/validacion", obtenerEstadoValidacion);
 
 // Creación de los comentarios
 router.post("/:id/comentarios", addComentario);

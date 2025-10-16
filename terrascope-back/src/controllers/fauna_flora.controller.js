@@ -150,3 +150,97 @@ export const getFrequentZones = async (req, res) => {
     res.status(500).json({ message: "Error al obtener zonas frecuentes", error });
   }
 };
+
+// Votar por comunidad
+export const votarValidacion = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    const { id_usuario } = req.body;
+
+    if (!id_usuario) 
+      return res.status(400).json({ message: "Se requiere el id_usuario" });
+
+    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    if (!avistamiento) 
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+
+    // Evitar que el creador vote su propio avistamiento
+    if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario) {
+      return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
+    }
+
+    // Evitar votos duplicados
+    if (avistamiento.validacion.usuarios_validadores.includes(id_usuario)) {
+      return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
+    }
+
+    // Agregar usuario a validadores y sumar voto
+    avistamiento.validacion.usuarios_validadores.push(id_usuario);
+    avistamiento.validacion.votos_comunidad += 1;
+
+    // Cambiar estado si alcanza los votos requeridos
+    if (avistamiento.validacion.votos_comunidad >= avistamiento.validacion.requeridos_comunidad) {
+      avistamiento.validacion.estado = "validado_comunidad";
+    }
+
+    await avistamiento.save();
+
+    res.status(200).json({
+      message: "Voto registrado correctamente",
+      estado_actual: avistamiento.validacion.estado,
+      votos_comunidad: avistamiento.validacion.votos_comunidad,
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al registrar el voto", error: error.message });
+  }
+};
+
+
+// Validación por experto
+export const validarPorExperto = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    const { id_usuario, rol } = req.body;
+
+    if (!id_usuario || !rol) return res.status(400).json({ message: "Se requiere id_usuario y rol" });
+
+    // Solo investigadores o administradores pueden validar
+    if (!["Investigador", "Administrador"].includes(rol)) {
+      return res.status(403).json({ message: "Usuario no autorizado para validar como experto" });
+    }
+
+    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+
+    avistamiento.validacion.validado_por_experto = true;
+    avistamiento.validacion.estado = "validado_experto";
+
+    await avistamiento.save();
+
+    res.status(200).json({
+      message: "Avistamiento validado por experto",
+      estado_actual: avistamiento.validacion.estado,
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al validar por experto", error: error.message });
+  }
+};
+
+// Obtener estado de validación
+export const obtenerEstadoValidacion = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+
+    res.status(200).json(avistamiento.validacion);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al obtener el estado de validación", error: error.message });
+  }
+};
