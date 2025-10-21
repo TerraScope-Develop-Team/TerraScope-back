@@ -1,16 +1,67 @@
 import FaunaFlora from "../models/fauna_flora.model.js";
 import Habitat from "../models/habitat.model.js";
+import mongoose from "mongoose";
 
 // Crear avistamiento
 export const createAvistamiento = async (req, res) => {
   try {
-    const { nombre_comun, nombre_cientifico, especie, descripcion, imagen,
-      ubicacion, comportamiento, estado_extincion, estado_especimen, habitad } = req.body;
+    console.log('📥 Datos recibidos en createAvistamiento:');
+    console.log(JSON.stringify(req.body, null, 2));
 
-    const habitatExiste = await Habitat.findById(habitad.id_habitad);
-    if(!habitatExiste){
-      return res.status(404).json({ message: "Habitat no encontrado" });
+    const { 
+      nombre_comun, 
+      nombre_cientifico, 
+      especie, 
+      descripcion, 
+      imagen,
+      ubicacion, 
+      comportamiento, 
+      estado_extincion, 
+      estado_especimen, 
+      habitat,  // ← CORREGIDO: era "habitad"
+      tipo,     // ← AGREGADO: faltaba extraer
+      nombre_usuario,  // ← AGREGADO: faltaba extraer
+      validacion  // ← AGREGADO: faltaba extraer (opcional)
+    } = req.body;
+
+    // Validar que habitat existe y tiene id_habitat
+    if (!habitat || !habitat.id_habitat) {
+      console.log('❌ Habitat no proporcionado o sin ID');
+      return res.status(400).json({ 
+        message: "Habitat es requerido y debe tener un id_habitat" 
+      });
     }
+
+    console.log('🔍 Validando habitat con ID:', habitat.id_habitat);
+
+    // Validar que el ID es un ObjectId válido
+    if (!mongoose.Types.ObjectId.isValid(habitat.id_habitat)) {
+      console.log('❌ ID de habitat NO es válido');
+      return res.status(400).json({ 
+        message: "ID de habitat inválido" 
+      });
+    }
+
+    // Buscar el habitat en la base de datos
+    const habitatExiste = await Habitat.findById(habitat.id_habitat); // ← CORREGIDO: era "habitad.id_habitad"
+    
+    if (!habitatExiste) {
+      console.log('❌ Habitat no encontrado en la base de datos');
+      return res.status(404).json({ 
+        message: "Habitat no encontrado" 
+      });
+    }
+
+    console.log('✅ Habitat encontrado:', habitatExiste.nombre_habitat);
+
+    // Convertir id_habitat a ObjectId
+    const habitatData = {
+      id_habitat: new mongoose.Types.ObjectId(habitat.id_habitat),
+      nombre_habitat: habitat.nombre_habitat,
+      descripcion_habitat: habitat.descripcion_habitat
+    };
+
+    console.log('💾 Creando nuevo avistamiento...');
 
     const nuevoAvistamiento = new FaunaFlora({
       nombre_comun,
@@ -22,16 +73,46 @@ export const createAvistamiento = async (req, res) => {
       comportamiento,
       estado_extincion,
       estado_especimen,
-      habitad,
+      habitat: habitatData,  // ← CORREGIDO: era "habitad"
       tipo,
-      nombre_usuario
+      nombre_usuario,
+      validacion: validacion || {  // ← Usar valores por defecto si no viene
+        estado: "pendiente",
+        votos_comunidad: 0,
+        requeridos_comunidad: 5,
+        usuarios_validadores: [],
+        validado_por_experto: false
+      }
     });
 
+    console.log('💾 Guardando en base de datos...');
     await nuevoAvistamiento.save();
-    res.status(201).json(nuevoAvistamiento);
+    
+    console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento._id);
+
+    res.status(201).json({
+      message: "Avistamiento creado exitosamente",
+      data: nuevoAvistamiento
+    });
 
   } catch (error) {
-    res.status(500).json({ message: "Error al crear un avistamiento", error });
+    console.error('❌ Error completo:', error);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    
+    // Manejar errores de validación de Mongoose
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        message: "Error de validación",
+        detalles: messages
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Error al crear un avistamiento", 
+      error: error.message 
+    });
   }
 };
 
@@ -42,24 +123,33 @@ export const getAvistamientos = async (req, res) => {
     let filter = {};
     if (especie) filter.especie = especie;
     if (categoria) {
-   
       filter.especie = categoria; // Adjust as needed
     }
     const avistamientos = await FaunaFlora.find(filter);
     res.status(200).json(avistamientos);
   } catch (error) {
-    res.status(500).json({ message: "Error al conseguir los avistamientos", error });
+    console.error('❌ Error al obtener avistamientos:', error);
+    res.status(500).json({ 
+      message: "Error al conseguir los avistamientos", 
+      error: error.message 
+    });
   }
 };
 
 // Obtener por ID
 export const getAvistamientoById = async (req, res) => {
   try {
-    const avistamiento = await FaunaFlora.findById(req.params.id); // sin populate
-    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+    const avistamiento = await FaunaFlora.findById(req.params.id);
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
     res.status(200).json(avistamiento);
   } catch (error) {
-    res.status(500).json({ message: "Error al obtener el avistamiento", error });
+    console.error('❌ Error al obtener avistamiento:', error);
+    res.status(500).json({ 
+      message: "Error al obtener el avistamiento", 
+      error: error.message 
+    });
   }
 };
 
@@ -68,7 +158,6 @@ export const addComentario = async (req, res) => {
   try {
     const { id_usuario, nombre_usuario, comentario } = req.body;
     
-
     if (!nombre_usuario || !comentario) {
       return res.status(400).json({ 
         message: "nombre_usuario y comentario son requeridos" 
@@ -81,29 +170,24 @@ export const addComentario = async (req, res) => {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    // Crear el nuevo comentario
     const nuevoComentario = {
       nombre_usuario, 
       comentario, 
       fecha: new Date()
     };
 
-    
     if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
-      
       if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
         nuevoComentario.id_usuario = id_usuario;
       }
     }
 
-   
     avistamiento.comentarios.push(nuevoComentario);
-    
     await avistamiento.save();
     
     res.status(200).json(avistamiento);
   } catch (error) {
-    console.error("Error al agregar comentario:", error);
+    console.error("❌ Error al agregar comentario:", error);
     res.status(500).json({ 
       message: "Error al agregar comentario", 
       error: error.message 
@@ -111,22 +195,24 @@ export const addComentario = async (req, res) => {
   }
 };
 
-
-
 export const deleteAvistamiento = async (req, res) => {
   try {
     const avistamiento = await FaunaFlora.findByIdAndDelete(req.params.id);
-    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
     res.status(200).json({ message: "Avistamiento eliminado correctamente" });
   } catch (error) {
-    res.status(500).json({ message: "Error al eliminar avistamiento", error });
+    console.error('❌ Error al eliminar avistamiento:', error);
+    res.status(500).json({ 
+      message: "Error al eliminar avistamiento", 
+      error: error.message 
+    });
   }
 };
 
-
 export const getFrequentZones = async (req, res) => {
   try {
-   
     const frequentZones = await FaunaFlora.aggregate([
       {
         $group: {
@@ -135,7 +221,7 @@ export const getFrequentZones = async (req, res) => {
         }
       },
       {
-        $match: { count: { $gt: 1 } } // More than 1 sighting
+        $match: { count: { $gt: 1 } }
       },
       {
         $project: {
@@ -149,7 +235,11 @@ export const getFrequentZones = async (req, res) => {
     ]);
     res.status(200).json(frequentZones);
   } catch (error) {
-    res.status(500).json({ message: "Error al obtener zonas frecuentes", error });
+    console.error('❌ Error al obtener zonas frecuentes:', error);
+    res.status(500).json({ 
+      message: "Error al obtener zonas frecuentes", 
+      error: error.message 
+    });
   }
 };
 
@@ -159,28 +249,26 @@ export const votarValidacion = async (req, res) => {
     const avistamientoId = req.params.id;
     const { id_usuario } = req.body;
 
-    if (!id_usuario) 
+    if (!id_usuario) {
       return res.status(400).json({ message: "Se requiere el id_usuario" });
+    }
 
     const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) 
+    if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
 
-    // Evitar que el creador vote su propio avistamiento
     if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario) {
       return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
     }
 
-    // Evitar votos duplicados
     if (avistamiento.validacion.usuarios_validadores.includes(id_usuario)) {
       return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
     }
 
-    // Agregar usuario a validadores y sumar voto
     avistamiento.validacion.usuarios_validadores.push(id_usuario);
     avistamiento.validacion.votos_comunidad += 1;
 
-    // Cambiar estado si alcanza los votos requeridos
     if (avistamiento.validacion.votos_comunidad >= avistamiento.validacion.requeridos_comunidad) {
       avistamiento.validacion.estado = "validado_comunidad";
     }
@@ -194,11 +282,13 @@ export const votarValidacion = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error al registrar el voto", error: error.message });
+    console.error('❌ Error al registrar voto:', error);
+    res.status(500).json({ 
+      message: "Error al registrar el voto", 
+      error: error.message 
+    });
   }
 };
-
 
 // Validación por experto
 export const validarPorExperto = async (req, res) => {
@@ -206,15 +296,18 @@ export const validarPorExperto = async (req, res) => {
     const avistamientoId = req.params.id;
     const { id_usuario, rol } = req.body;
 
-    if (!id_usuario || !rol) return res.status(400).json({ message: "Se requiere id_usuario y rol" });
+    if (!id_usuario || !rol) {
+      return res.status(400).json({ message: "Se requiere id_usuario y rol" });
+    }
 
-    // Solo investigadores o administradores pueden validar
     if (!["Investigador", "Administrador"].includes(rol)) {
       return res.status(403).json({ message: "Usuario no autorizado para validar como experto" });
     }
 
     const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
 
     avistamiento.validacion.validado_por_experto = true;
     avistamiento.validacion.estado = "validado_experto";
@@ -227,8 +320,11 @@ export const validarPorExperto = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error al validar por experto", error: error.message });
+    console.error('❌ Error al validar por experto:', error);
+    res.status(500).json({ 
+      message: "Error al validar por experto", 
+      error: error.message 
+    });
   }
 };
 
@@ -237,12 +333,17 @@ export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
     const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) return res.status(404).json({ message: "Avistamiento no encontrado" });
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
 
     res.status(200).json(avistamiento.validacion);
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error al obtener el estado de validación", error: error.message });
+    console.error('❌ Error al obtener estado de validación:', error);
+    res.status(500).json({ 
+      message: "Error al obtener el estado de validación", 
+      error: error.message 
+    });
   }
 };

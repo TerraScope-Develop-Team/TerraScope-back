@@ -19,6 +19,14 @@ const faunaFloraSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+        tipo: {
+        type: String,
+        required: true 
+    },
+    nombre_usuario: {
+        type: String,
+        required: true 
+    },
     imagen: {
         type: String,
         required: true //almacena base64
@@ -33,9 +41,9 @@ const faunaFloraSchema = new mongoose.Schema({
     },
     estado_extincion: { type: String, required: true },
     estado_especimen: { type: String, required: true },
-    habitad: {
-        id_habitad: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
-        nombre_habitad: { type: String },
+    habitat: {
+        id_habitat: { type: mongoose.Schema.Types.ObjectId, ref: "habitat" },
+        nombre_habitat: { type: String },
         descripcion_habitat: { type: String }
     },
     comentarios: [{
@@ -67,6 +75,7 @@ const faunaFloraSchema = new mongoose.Schema({
         validado_por_experto: {
             type: Boolean,
             default: false,
+            
         },
     },
 });
