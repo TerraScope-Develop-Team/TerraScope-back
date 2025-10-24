@@ -328,22 +328,33 @@ export const validarPorExperto = async (req, res) => {
   }
 };
 
-// Obtener estado de validación
 export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
+    const userId = req.query.userId; // o req.body.userId
+
+    if (!userId) return res.status(400).json({ message: 'Falta el userId' });
+
     const avistamiento = await FaunaFlora.findById(avistamientoId);
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    res.status(200).json(avistamiento.validacion);
+    const validacion = avistamiento.validacion;
+    const yaVoto = validacion.usuarios_validadores?.includes(userId) ?? false;
 
-  } catch (error) {
-    console.error('❌ Error al obtener estado de validación:', error);
-    res.status(500).json({ 
-      message: "Error al obtener el estado de validación", 
-      error: error.message 
+    res.status(200).json({
+      estado: validacion.estado,
+      votos_comunidad: validacion.votos_comunidad,
+      requeridos_comunidad: validacion.requeridos_comunidad,
+      validado_por_experto: validacion.validado_por_experto,
+      usuarios_validadores: validacion.usuarios_validadores,
+      yaVoto,
     });
+  } catch (error) {
+    console.error('❌ Error:', error);
+    res.status(500).json({ message: "Error al obtener estado", error: error.message });
   }
 };
+
+
