@@ -9,7 +9,7 @@ const UsuarioSchema = new mongoose.Schema({
   email_usuario: {
     type: String,
     required: true,
-    unique: true, 
+    unique: true,
     lowercase: true
   },
   contrasenia_usuario: {
@@ -21,9 +21,14 @@ const UsuarioSchema = new mongoose.Schema({
     required: false
   },
   fecha_nac_usuario: {
-    type: Date, 
+    type: Date,
     required: false
   },
+  imagen_perfil: {
+    type: String, 
+    required: false
+  }
+  ,
   rol: {
     id_rol: {
       type: mongoose.Schema.Types.ObjectId,
@@ -32,12 +37,12 @@ const UsuarioSchema = new mongoose.Schema({
     nombre_rol: {
       type: String,
       required: true,
-      enum: ["Administrador", "Investigador", "Usuario"] 
+      enum: ["Administrador", "Investigador", "Usuario"]
     }
   }
 }, {
-  collection: "usuarios", 
-  timestamps: true        
+  collection: "usuarios",
+  timestamps: true
 });
 
 // ✅ Cambiar module.exports por export default
