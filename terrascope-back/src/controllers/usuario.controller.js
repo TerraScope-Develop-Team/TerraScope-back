@@ -3,11 +3,42 @@ import Usuario from "../models/usuario.model.js";
 // Crear un usuario
 export const crearUsuario = async (req, res) => {
   try {
-    const nuevoUsuario = new Usuario(req.body);
+    const {
+      nombre_usuario,
+      email_usuario,
+      contrasenia_usuario,
+      telefono_usuario,
+      fecha_nac_usuario,
+      rol,
+      imagen_perfil // 🖼️ Nuevo campo
+    } = req.body;
+
+    // Validar campos requeridos
+    if (!nombre_usuario || !email_usuario || !contrasenia_usuario || !rol) {
+      return res.status(400).json({ message: "Faltan campos obligatorios" });
+    }
+
+    // Crear el nuevo usuario
+    const nuevoUsuario = new Usuario({
+      nombre_usuario,
+      email_usuario,
+      contrasenia_usuario,
+      telefono_usuario,
+      fecha_nac_usuario,
+      rol,
+      imagen_perfil: imagen_perfil || "" // Si no se envía imagen, se guarda vacío
+    });
+
     await nuevoUsuario.save();
-    res.status(201).json({ message: "Usuario creado correctamente", data: nuevoUsuario });
+    res.status(201).json({
+      message: "Usuario creado correctamente",
+      data: nuevoUsuario
+    });
   } catch (error) {
-    res.status(400).json({ message: "Error al crear usuario", error: error.message });
+    res.status(400).json({
+      message: "Error al crear usuario",
+      error: error.message
+    });
   }
 };
 
@@ -17,7 +48,10 @@ export const obtenerUsuarios = async (req, res) => {
     const usuarios = await Usuario.find();
     res.status(200).json(usuarios);
   } catch (error) {
-    res.status(500).json({ message: "Error al obtener usuarios", error: error.message });
+    res.status(500).json({
+      message: "Error al obtener usuarios",
+      error: error.message
+    });
   }
 };
 
@@ -30,24 +64,43 @@ export const obtenerUsuarioPorId = async (req, res) => {
     }
     res.status(200).json(usuario);
   } catch (error) {
-    res.status(500).json({ message: "Error al obtener usuario", error: error.message });
+    res.status(500).json({
+      message: "Error al obtener usuario",
+      error: error.message
+    });
   }
 };
 
 // Actualizar un usuario
 export const actualizarUsuario = async (req, res) => {
   try {
+    const { imagen_perfil } = req.body;
+
+    // Si se envía una imagen vacía, la ignoramos para no borrar la anterior
+    const updateData = { ...req.body };
+    if (imagen_perfil === undefined || imagen_perfil === null) {
+      delete updateData.imagen_perfil;
+    }
+
     const usuarioActualizado = await Usuario.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true }
     );
+
     if (!usuarioActualizado) {
       return res.status(404).json({ message: "Usuario no encontrado" });
     }
-    res.status(200).json({ message: "Usuario actualizado correctamente", data: usuarioActualizado });
+
+    res.status(200).json({
+      message: "Usuario actualizado correctamente",
+      data: usuarioActualizado
+    });
   } catch (error) {
-    res.status(400).json({ message: "Error al actualizar usuario", error: error.message });
+    res.status(400).json({
+      message: "Error al actualizar usuario",
+      error: error.message
+    });
   }
 };
 
@@ -60,6 +113,9 @@ export const eliminarUsuario = async (req, res) => {
     }
     res.status(200).json({ message: "Usuario eliminado correctamente" });
   } catch (error) {
-    res.status(500).json({ message: "Error al eliminar usuario", error: error.message });
+    res.status(500).json({
+      message: "Error al eliminar usuario",
+      error: error.message
+    });
   }
 };
