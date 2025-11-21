@@ -1,6 +1,7 @@
 import FaunaFlora from "../models/fauna_flora.model.js";
 import Habitat from "../models/habitat.model.js";
 import mongoose from "mongoose";
+import retosService from "../services/retos.service.js";
 
 // Crear avistamiento
 export const createAvistamiento = async (req, res) => {
@@ -8,19 +9,20 @@ export const createAvistamiento = async (req, res) => {
     console.log('📥 Datos recibidos en createAvistamiento:');
     console.log(JSON.stringify(req.body, null, 2));
 
-    const { 
-      nombre_comun, 
-      nombre_cientifico, 
-      especie, 
-      descripcion, 
+    const {
+      nombre_comun,
+      nombre_cientifico,
+      especie,
+      descripcion,
       imagen,
-      ubicacion, 
-      comportamiento, 
-      estado_extincion, 
-      estado_especimen, 
+      ubicacion,
+      comportamiento,
+      estado_extincion,
+      estado_especimen,
       habitat,  // ← CORREGIDO: era "habitad"
       tipo,     // ← AGREGADO: faltaba extraer
       nombre_usuario,  // ← AGREGADO: faltaba extraer
+      id_usuario,  // ← AGREGADO: faltaba extraer
       validacion  // ← AGREGADO: faltaba extraer (opcional)
     } = req.body;
 
@@ -76,6 +78,7 @@ export const createAvistamiento = async (req, res) => {
       habitat: habitatData,  // ← CORREGIDO: era "habitad"
       tipo,
       nombre_usuario,
+      id_usuario,
       validacion: validacion || {  // ← Usar valores por defecto si no viene
         estado: "pendiente",
         votos_comunidad: 0,
@@ -89,6 +92,19 @@ export const createAvistamiento = async (req, res) => {
     await nuevoAvistamiento.save();
     
     console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento._id);
+    // Al final de createAvistamiento, antes del res.status(201).json
+try {
+  if (nuevoAvistamiento.id_usuario) {
+    await retosService.actualizarHistorial(
+      nuevoAvistamiento.id_usuario,
+      nuevoAvistamiento.tipo,
+      nuevoAvistamiento.especie
+    );
+  }
+} catch (error) {
+  console.error("❌ Error actualizando historial:", error);
+}
+
 
     res.status(201).json({
       message: "Avistamiento creado exitosamente",

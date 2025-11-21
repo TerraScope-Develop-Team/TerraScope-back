@@ -1,15 +1,15 @@
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
-import "./config/db.js"; // Conectar a la base de datos
+import "./config/db.js";
 import habitatRoutes from "./routes/habitat.routes.js";
 import floraFaunaRoutes from "./routes/Fauna_Flora.routes.js";
 import usuarioRoutes from "./routes/usuario.routes.js";
 import iaRoutes from "./routes/ia.routes.js";
-
+import retosRoutes from "./routes/retos.routes.js";
+import retosService from "./services/retos.service.js";
 
 const app = express();
-
 
 // Middlewares
 app.use(cors());
@@ -20,9 +20,9 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 // Rutas
 app.use("/api/habitats", habitatRoutes);
 app.use("/api/usuarios", usuarioRoutes);
-app.use("/api/fauna-flora", floraFaunaRoutes );
+app.use("/api/fauna-flora", floraFaunaRoutes);
 app.use("/api/ia", iaRoutes);
-
+app.use("/api/retos", retosRoutes);
 
 // Manejo de errores
 app.use((err, req, res, next) => {
