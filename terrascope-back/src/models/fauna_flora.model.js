@@ -19,13 +19,18 @@ const faunaFloraSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-        tipo: {
+    tipo: {
         type: String,
-        required: true 
+        required: true
     },
     nombre_usuario: {
         type: String,
-        required: true 
+        required: true
+    },
+    id_usuario: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Usuario",
+        required: false
     },
     imagen: {
         type: String,
