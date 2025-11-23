@@ -9,18 +9,20 @@ class RetosService {
     this.inicializarCron();
   }
 
-  inicializarCron() {
-    cron.schedule("*/5 * * * *", async () => {
-      console.log("🔄 Generando nuevos retos dinámicos cada 5 minutos...");
-      await this.generarRetosAutomaticos();
-    });
+   inicializarCron() {
+  cron.schedule("0 */2 * * *", async () => {
+    console.log("🔄 Generando nuevos retos dinámicos cada 2 horas...");
+    await this.generarRetosAutomaticos();
+  });
 
-    console.log("✅ Cron job para retos configurado (cada 5 minutos)");
-  }
+  console.log("✅ Cron job para retos configurado (cada 2 horas)");
+}
+
 
   async generarRetosAutomaticos() {
     try {
-      const tendencias = await FaunaFlora.aggregate([
+      // Obtener especies populares con conteo >= 4
+      const especiesPopulares = await FaunaFlora.aggregate([
         {
           $group: {
             _id: { tipo: "$tipo", especie: "$especie" },
@@ -29,35 +31,84 @@ class RetosService {
         },
         {
           $match: {
-            count: { $gte: 5 }
+            count: { $gte: 4 }
           }
         },
         {
           $sort: { count: -1 }
         },
         {
+          $limit: 3
+        }
+      ]);
+
+      // Obtener especies raras con conteo < 4
+      const especiesRaras = await FaunaFlora.aggregate([
+        {
+          $group: {
+            _id: { tipo: "$tipo", especie: "$especie" },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: {
+            count: { $lt: 4 }
+          }
+        },
+        {
+          $sort: { count: 1 }
+        },
+        {
           $limit: 5
         }
       ]);
 
-      console.log("📊 Tendencias detectadas:", tendencias);
+      console.log("📊 Especies populares:", especiesPopulares);
+      console.log("📉 Especies raras:", especiesRaras);
 
-      for (const tendencia of tendencias) {
+      // Crear retos para especies populares (1 reto por especie con tipo fijo basado en índice)
+      for (let index = 0; index < especiesPopulares.length; index++) {
+        const tendencia = especiesPopulares[index];
         const { tipo, especie } = tendencia._id;
         const cantidad = Math.max(5, Math.floor(tendencia.count * 0.3));
 
         const fechaFinal = new Date(Date.now() + 1 * 60 * 60 * 1000);
 
-        // FORMATO CORRECTO: tipo.especie (ej: "fauna.Mamífero")
+
         const condicionKey = tipo === "Fauna"
           ? `fauna.${especie}`
           : `flora.${especie}`;
 
         const condiciones = {};
-        condiciones[condicionKey] = cantidad;
 
-        const nombreReto = `Explorador de ${especie}s`;
-        const descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 hora`;
+        // Asignar un tipo de reto fijo según el índice del popular
+        const tipoRetoPopular = index; // 0 para primera, 1 para segunda, 2 para tercera especie
+
+        let nombreReto = "";
+        let descripcionReto = "";
+
+        switch (tipoRetoPopular) {
+          case 0:
+            condiciones[condicionKey] = cantidad;
+            nombreReto = `Explorador de ${especie}s`;
+            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 hora`;
+            break;
+          case 1:
+            condiciones[condicionKey] = cantidad;
+            nombreReto = `Maratón de avistamientos: ${especie}`;
+            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 horas`;
+            break;
+          case 2:
+            condiciones[condicionKey] = Math.floor(cantidad / 2);
+            nombreReto = `Avistador consistente: ${especie}`;
+            descripcionReto = `Registra al menos ${Math.floor(cantidad / 2)} avistamientos de ${especie} en 1 horas`;
+            break;
+          default:
+            condiciones[condicionKey] = cantidad;
+            nombreReto = `Explorador de ${especie}s`;
+            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 hora`;
+            break;
+        }
 
         const retoExistente = await Reto.findOne({
           nombre_reto: nombreReto,
@@ -79,7 +130,93 @@ class RetosService {
 
           await observerService.notify("NUEVO_RETO", nuevoReto);
 
-          console.log(`✅ Reto creado automáticamente: ${nombreReto}`);
+          console.log(`✅ Reto popular creado automáticamente: ${nombreReto}`);
+        }
+      }
+
+      // Crear retos variados para especies raras
+      for (const rareza of especiesRaras) {
+        const { tipo, especie } = rareza._id;
+
+        const fechaFinal = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+        const condicionKey = tipo === "Fauna"
+          ? `fauna.${especie}`
+          : `flora.${especie}`;
+
+        const condiciones = {};
+
+        // Variar el tipo de reto para especies raras
+        const tipoReto = Math.floor(Math.random() * 3);
+
+        let nombreReto = "";
+        let descripcionReto = "";
+
+        switch (tipoReto) {
+          case 0:
+            // Primer avistamiento
+            condiciones[condicionKey] = 1;
+            nombreReto = `Descubre una nueva especie: ${especie}`;
+            descripcionReto = `Registra tu primer avistamiento de ${especie}`;
+            break;
+          case 1:
+            // Registro pequeño número de avistamientos
+            condiciones[condicionKey] = 3;
+            nombreReto = `Explorador temprano de ${especie}`;
+            descripcionReto = `Registra al menos 3 avistamientos de ${especie}`;
+            break;
+          case 2:
+            // Retos con tiempo extendido y pocas cantidades
+            condiciones[condicionKey] = 2;
+            nombreReto = `Observador paciente de ${especie}`;
+            descripcionReto = `Registra 2 avistamientos de ${especie} en 2 horas`;
+            break;
+          case 3:
+            // Avistamientos en zona específica (ejemplo zonaFrecuente)
+            condiciones[condicionKey] = 2;
+            nombreReto = `Explorador local de ${especie}`;
+            descripcionReto = `Registra 2 avistamientos de ${especie} en una zona frecuente`;
+            break;
+          case 4:
+            // Reto de combinación para rareza
+            condiciones[condicionKey] = 1;
+            nombreReto = `Combo raro: registra al menos 1 avistamiento de ${especie} y participa en la comunidad`;
+            descripcionReto = `Registra un avistamiento de ${especie} y realiza al menos un comentario o validación.`;
+            break;
+          case 5:
+            // Reto de paciencia extendida
+            condiciones[condicionKey] = 1;
+            nombreReto = `Paciente naturalista: registra un avistamiento de ${especie} en un plazo extendido de 3 horas`;
+            descripcionReto = `Registra un avistamiento de ${especie} en un periodo de 3 horas.`;
+            break;
+          default:
+            condiciones[condicionKey] = 2;
+            nombreReto = `Explorador raro avanzado de ${especie}`;
+            descripcionReto = `Registra 2 avistamientos de ${especie} en 1 hora.`;
+            break;
+        }
+
+        const retoExistente = await Reto.findOne({
+          nombre_reto: nombreReto,
+          estado: "activo"
+        });
+
+        if (!retoExistente) {
+          const nuevoReto = new Reto({
+            nombre_reto: nombreReto,
+            descripcion_reto: descripcionReto,
+            fecha_inicio: new Date(),
+            fecha_final: fechaFinal,
+            condiciones: condiciones,
+            es_temporal: true,
+            estado: "activo"
+          });
+
+          await nuevoReto.save();
+
+          await observerService.notify("NUEVO_RETO", nuevoReto);
+
+          console.log(`✅ Reto raro creado automáticamente: ${nombreReto}`);
         }
       }
 
@@ -89,7 +226,7 @@ class RetosService {
     }
   }
 
-  async finalizarRetosExpirados() {
+   async finalizarRetosExpirados() {
     try {
       const ahora = new Date();
       
