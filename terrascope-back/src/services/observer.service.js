@@ -25,7 +25,7 @@ class ObserverService {
       this.subscribers.set(eventType, []);
     }
     this.subscribers.get(eventType).push(callback);
-    console.log(`✅ Suscriptor agregado para: ${eventType}`);
+    console.log(`Suscriptor agregado para: ${eventType}`);
   }
 
   unsubscribe(eventType, callback) {
@@ -35,12 +35,12 @@ class ObserverService {
     const index = callbacks.indexOf(callback);
     if (index > -1) {
       callbacks.splice(index, 1);
-      console.log(`❌ Suscriptor eliminado de: ${eventType}`);
+      console.log(` Suscriptor eliminado de: ${eventType}`);
     }
   }
 
   async notify(eventType, data) {
-    console.log(`📢 Notificando evento: ${eventType}`);
+    console.log(`Notificando evento: ${eventType}`);
     
     const handler = this.eventHandlers.get(eventType);
     if (handler) {
@@ -52,26 +52,26 @@ class ObserverService {
       try {
         await callback(data);
       } catch (error) {
-        console.error(`❌ Error ejecutando callback para ${eventType}:`, error);
+        console.error(`Error ejecutando callback para ${eventType}:`, error);
       }
     }
   }
 
   async handleAvistamientoCreado(data) {
-    console.log("🔍 Procesando nuevo avistamiento:", data);
+    console.log(" Procesando nuevo avistamiento:", data);
   }
 
   async handleRetoCompletado(data) {
-    console.log("🏆 Procesando reto completado:", data);
+    console.log(" Procesando reto completado:", data);
     try {
       await this.enviarCertificado(data);
     } catch (error) {
-      console.error("❌ Error enviando certificado, pero el logro se guardó correctamente:", error);
+      console.error(" Error enviando certificado, pero el logro se guardó correctamente:", error);
     }
   }
 
   async handleNuevoReto(data) {
-    console.log("🎯 Procesando nuevo reto:", data);
+    console.log(" Procesando nuevo reto:", data);
     await this.notificarNuevoReto(data);
   }
 

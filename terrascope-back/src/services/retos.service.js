@@ -317,13 +317,13 @@ class RetosService {
 
   async completarReto(usuarioId, retoId) {
     try {
-      console.log(`\n🏆 COMPLETANDO RETO...`);
+      console.log(`\n COMPLETANDO RETO...`);
       
       const usuario = await Usuario.findById(usuarioId);
       const reto = await Reto.findById(retoId);
 
       if (!usuario || !reto) {
-        console.log("❌ Usuario o reto no encontrado");
+        console.log(" Usuario o reto no encontrado");
         return;
       }
 
@@ -333,7 +333,7 @@ class RetosService {
       );
 
       if (yaCompletado) {
-        console.log("⚠️ Usuario ya había completado este reto");
+        console.log(" Usuario ya había completado este reto");
         return;
       }
 
