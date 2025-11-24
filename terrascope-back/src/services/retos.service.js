@@ -3,249 +3,167 @@ import Usuario from "../models/usuario.model.js";
 import FaunaFlora from "../models/fauna_flora.model.js";
 import observerService from "./observer.service.js";
 import cron from "node-cron";
+import moment from "moment-timezone";
 
-class RetosService {
-  constructor() {
-    this.inicializarCron();
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
   }
-
-   inicializarCron() {
-  cron.schedule("0 */2 * * *", async () => {
-    console.log("🔄 Generando nuevos retos dinámicos cada 2 horas...");
-    await this.generarRetosAutomaticos();
-  });
-
-  console.log("✅ Cron job para retos configurado (cada 2 horas)");
+  return array;
 }
 
+class RetosService {
+constructor() {
+this.inicializarCron();
+}
 
-  async generarRetosAutomaticos() {
-    try {
-      // Obtener especies populares con conteo >= 4
-      const especiesPopulares = await FaunaFlora.aggregate([
-        {
-          $group: {
-            _id: { tipo: "$tipo", especie: "$especie" },
-            count: { $sum: 1 }
-          }
-        },
-        {
-          $match: {
-            count: { $gte: 4 }
-          }
-        },
-        {
-          $sort: { count: -1 }
-        },
-        {
-          $limit: 3
-        }
-      ]);
+inicializarCron() {
+// Ejecutar cada minuto para pruebas; luego cambiar a cada 6 horas
+cron.schedule("*/5 * * * *", async () => {
+console.log("🔄 Generando nuevos retos dinámicos...");
+await this.generarRetosAutomaticos();
+});
 
-      // Obtener especies raras con conteo < 4
-      const especiesRaras = await FaunaFlora.aggregate([
-        {
-          $group: {
-            _id: { tipo: "$tipo", especie: "$especie" },
-            count: { $sum: 1 }
-          }
-        },
-        {
-          $match: {
-            count: { $lt: 4 }
-          }
-        },
-        {
-          $sort: { count: 1 }
-        },
-        {
-          $limit: 5
-        }
-      ]);
+console.log("✅ Cron job para retos configurado");
 
-      console.log("📊 Especies populares:", especiesPopulares);
-      console.log("📉 Especies raras:", especiesRaras);
+}
 
-      // Crear retos para especies populares (1 reto por especie con tipo fijo basado en índice)
-      for (let index = 0; index < especiesPopulares.length; index++) {
-        const tendencia = especiesPopulares[index];
-        const { tipo, especie } = tendencia._id;
-        const cantidad = Math.max(5, Math.floor(tendencia.count * 0.3));
+async generarRetosAutomaticos() {
+  try {
+    const MAX_RETOS_ACTIVOS = 3;
+    
+    // ... (Tu lógica de limpieza de retos expirados y conteo se queda igual) ...
+    // Supongamos que calculamos cuántos retos faltan crear:
+    const retosActivosCount = await Reto.countDocuments({ estado: "activo" });
+    const espaciosDisponibles = MAX_RETOS_ACTIVOS - retosActivosCount;
+    
+    if (espaciosDisponibles <= 0) return;
 
-        const fechaFinal = new Date(Date.now() + 1 * 60 * 60 * 1000);
+    // ==========================================
+    // 1. ANÁLISIS DE TENDENCIAS (HÍBRIDO)
+    // ==========================================
 
+    // A) Tendencias de Fauna (Por ESPECIE)
+    // Buscamos animales específicos populares (ej. "Iguana")
+    const topFauna = await FaunaFlora.aggregate([
+      { $match: { tipo: { $nin: ["Planta", "Árbol", "Hierba", "Hongo"] } } },
+      { $group: { _id: "$especie", count: { $sum: 1 } } }, // Agrupar por ESPECIE
+      { $sort: { count: -1 } },
+      { $limit: 3 }
+    ]);
 
-        const condicionKey = tipo === "Fauna"
-          ? `fauna.${especie}`
-          : `flora.${especie}`;
+    // B) Tendencias de Flora (Por TIPO)
+    // Buscamos categorías populares (ej. "Árbol")
+    const topFlora = await FaunaFlora.aggregate([
+      { $match: { tipo: { $in: ["Planta", "Árbol", "Hierba", "Hongo"] } } },
+      { $group: { _id: "$tipo", count: { $sum: 1 } } }, // Agrupar por TIPO
+      { $sort: { count: -1 } },
+      { $limit: 2 }
+    ]);
 
-        const condiciones = {};
+    // ==========================================
+    // 2. CREACIÓN DE CANDIDATOS
+    // ==========================================
+    let candidatos = [];
 
-        // Asignar un tipo de reto fijo según el índice del popular
-        const tipoRetoPopular = index; // 0 para primera, 1 para segunda, 2 para tercera especie
+    // Formateamos Fauna (Específico)
+    topFauna.forEach(f => {
+      candidatos.push({
+        categoria: "fauna",
+        key: f._id,         // ej: "Iguana"
+        targetCount: Math.max(3, Math.floor(f.count * 0.4)), // Exigencia basada en popularidad
+        nombre: `Avistador de ${f._id}`,
+        desc: `Registra ${Math.max(3, Math.floor(f.count * 0.4))} avistamientos de ${f._id}`
+      });
+    });
 
-        let nombreReto = "";
-        let descripcionReto = "";
+    // Formateamos Flora (General)
+    topFlora.forEach(f => {
+      candidatos.push({
+        categoria: "flora",
+        key: f._id,         // ej: "Árbol"
+        targetCount: Math.max(5, Math.floor(f.count * 0.5)), // Exigencia un poco más alta porque es más fácil
+        nombre: `Explorador de ${f._id}s`, // Pluralizamos simple
+        desc: `Encuentra ${Math.max(5, Math.floor(f.count * 0.5))} ejemplares de tipo ${f._id}`
+      });
+    });
 
-        switch (tipoRetoPopular) {
-          case 0:
-            condiciones[condicionKey] = cantidad;
-            nombreReto = `Explorador de ${especie}s`;
-            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 hora`;
-            break;
-          case 1:
-            condiciones[condicionKey] = cantidad;
-            nombreReto = `Maratón de avistamientos: ${especie}`;
-            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 horas`;
-            break;
-          case 2:
-            condiciones[condicionKey] = Math.floor(cantidad / 2);
-            nombreReto = `Avistador consistente: ${especie}`;
-            descripcionReto = `Registra al menos ${Math.floor(cantidad / 2)} avistamientos de ${especie} en 1 horas`;
-            break;
-          default:
-            condiciones[condicionKey] = cantidad;
-            nombreReto = `Explorador de ${especie}s`;
-            descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 1 hora`;
-            break;
-        }
+    // Mezclar candidatos para variedad
+    candidatos = shuffleArray(candidatos);
 
-        const retoExistente = await Reto.findOne({
-          nombre_reto: nombreReto,
-          estado: "activo"
-        });
+    // ==========================================
+    // 3. GENERACIÓN DE RETOS
+    // ==========================================
 
-        if (!retoExistente) {
-          const nuevoReto = new Reto({
-            nombre_reto: nombreReto,
-            descripcion_reto: descripcionReto,
-            fecha_inicio: new Date(),
-            fecha_final: fechaFinal,
-            condiciones: condiciones,
-            es_temporal: true,
-            estado: "activo"
-          });
+    for (let i = 0; i < espaciosDisponibles; i++) {
+      if (i >= candidatos.length) break; // No hay más ideas
 
-          await nuevoReto.save();
-
-          await observerService.notify("NUEVO_RETO", nuevoReto);
-
-          console.log(`✅ Reto popular creado automáticamente: ${nombreReto}`);
-        }
-      }
-
-      // Crear retos variados para especies raras
-      for (const rareza of especiesRaras) {
-        const { tipo, especie } = rareza._id;
-
-        const fechaFinal = new Date(Date.now() + 2 * 60 * 60 * 1000);
-
-        const condicionKey = tipo === "Fauna"
-          ? `fauna.${especie}`
-          : `flora.${especie}`;
-
-        const condiciones = {};
-
-        // Variar el tipo de reto para especies raras
-        const tipoReto = Math.floor(Math.random() * 3);
-
-        let nombreReto = "";
-        let descripcionReto = "";
-
-        switch (tipoReto) {
-          case 0:
-            // Primer avistamiento
-            condiciones[condicionKey] = 1;
-            nombreReto = `Descubre una nueva especie: ${especie}`;
-            descripcionReto = `Registra tu primer avistamiento de ${especie}`;
-            break;
-          case 1:
-            // Registro pequeño número de avistamientos
-            condiciones[condicionKey] = 3;
-            nombreReto = `Explorador temprano de ${especie}`;
-            descripcionReto = `Registra al menos 3 avistamientos de ${especie}`;
-            break;
-          case 2:
-            // Retos con tiempo extendido y pocas cantidades
-            condiciones[condicionKey] = 2;
-            nombreReto = `Observador paciente de ${especie}`;
-            descripcionReto = `Registra 2 avistamientos de ${especie} en 2 horas`;
-            break;
-          case 3:
-            // Avistamientos en zona específica (ejemplo zonaFrecuente)
-            condiciones[condicionKey] = 2;
-            nombreReto = `Explorador local de ${especie}`;
-            descripcionReto = `Registra 2 avistamientos de ${especie} en una zona frecuente`;
-            break;
-          case 4:
-            // Reto de combinación para rareza
-            condiciones[condicionKey] = 1;
-            nombreReto = `Combo raro: registra al menos 1 avistamiento de ${especie} y participa en la comunidad`;
-            descripcionReto = `Registra un avistamiento de ${especie} y realiza al menos un comentario o validación.`;
-            break;
-          case 5:
-            // Reto de paciencia extendida
-            condiciones[condicionKey] = 1;
-            nombreReto = `Paciente naturalista: registra un avistamiento de ${especie} en un plazo extendido de 3 horas`;
-            descripcionReto = `Registra un avistamiento de ${especie} en un periodo de 3 horas.`;
-            break;
-          default:
-            condiciones[condicionKey] = 2;
-            nombreReto = `Explorador raro avanzado de ${especie}`;
-            descripcionReto = `Registra 2 avistamientos de ${especie} en 1 hora.`;
-            break;
-        }
-
-        const retoExistente = await Reto.findOne({
-          nombre_reto: nombreReto,
-          estado: "activo"
-        });
-
-        if (!retoExistente) {
-          const nuevoReto = new Reto({
-            nombre_reto: nombreReto,
-            descripcion_reto: descripcionReto,
-            fecha_inicio: new Date(),
-            fecha_final: fechaFinal,
-            condiciones: condiciones,
-            es_temporal: true,
-            estado: "activo"
-          });
-
-          await nuevoReto.save();
-
-          await observerService.notify("NUEVO_RETO", nuevoReto);
-
-          console.log(`✅ Reto raro creado automáticamente: ${nombreReto}`);
-        }
-      }
-
-      await this.finalizarRetosExpirados();
-    } catch (error) {
-      console.error("❌ Error generando retos automáticos:", error);
-    }
-  }
-
-   async finalizarRetosExpirados() {
-    try {
-      const ahora = new Date();
+      const candidato = candidatos[i];
       
-      const retosExpirados = await Reto.find({
-        fecha_final: { $lte: ahora },
+      // Clave de condición híbrida: 
+      // Si es fauna: "fauna.Iguana"
+      // Si es flora: "flora.Árbol"
+      const condicionKey = `${candidato.categoria}.${candidato.key}`;
+
+      // Verificar duplicados activos
+      const existe = await Reto.findOne({ 
+        estado: "activo", 
+        [`condiciones.${condicionKey}`]: { $exists: true } 
+      });
+      
+      if (existe) continue;
+
+      const ahora = moment().tz("America/Mexico_City").toDate();
+      const fechaFinal = moment(ahora).add(15, "minutes").toDate(); // Retos de 15 mins
+
+      const nuevoReto = new Reto({
+        nombre_reto: candidato.nombre,
+        descripcion_reto: candidato.desc,
+        fecha_inicio: ahora,
+        fecha_final: fechaFinal,
+        condiciones: {
+          [condicionKey]: candidato.targetCount
+        },
+        es_temporal: true,
         estado: "activo"
       });
 
-      for (const reto of retosExpirados) {
-        reto.estado = "finalizado";
-        await reto.save();
-        
-        console.log(`⏱️ Reto finalizado: ${reto.nombre_reto}`);
-      }
-    } catch (error) {
-      console.error("❌ Error finalizando retos:", error);
+      await nuevoReto.save();
+      await observerService.notify("NUEVO_RETO", nuevoReto);
+      console.log(`✅ Nuevo reto híbrido creado: ${nuevoReto.nombre_reto}`);
     }
+
+  } catch (error) {
+    console.error("❌ Error generando retos automáticos:", error);
+  }
+}
+
+
+
+async finalizarRetosExpirados() {
+try {
+const ahora = moment().tz("America/Mexico_City").toDate();
+
+  const retosExpirados = await Reto.find({
+    fecha_final: { $lte: ahora },
+    estado: "activo"
+  });
+
+  if (retosExpirados.length === 0) {
+    console.log("No hay retos expirados para finalizar.");
   }
 
+  for (const reto of retosExpirados) {
+    reto.estado = "finalizado";
+    await reto.save();
+    console.log(`⏱️ Reto finalizado: ${reto.nombre_reto}`);
+  }
+} catch (error) {
+  console.error("❌ Error finalizando retos:", error);
+}
+
+}
   async verificarProgreso(usuarioId) {
     try {
       console.log(`🔍 Verificando progreso para usuario: ${usuarioId}`);
@@ -390,45 +308,49 @@ class RetosService {
     }
   }
 
-  async actualizarHistorial(usuarioId, tipo, especie) {
-    try {
-      console.log(`\n📝 Actualizando historial: ${tipo} - ${especie}`);
-      
-      const usuario = await Usuario.findById(usuarioId);
-      if (!usuario) {
-        console.log("❌ Usuario no encontrado");
-        return;
-      }
+  // services/retos.service.js
 
-      // Asegurarse de que existen las estructuras
-      if (!usuario.historial) {
-        usuario.historial = { fauna: {}, flora: {} };
-      }
-      if (!usuario.historial.fauna) {
-        usuario.historial.fauna = {};
-      }
-      if (!usuario.historial.flora) {
-        usuario.historial.flora = {};
-      }
+async actualizarHistorial(usuarioId, tipo, especie) {
+  try {
+    const usuario = await Usuario.findById(usuarioId);
+    if (!usuario) return;
 
-      // Actualizar el contador
-      if (tipo === "Fauna") {
-        usuario.historial.fauna[especie] = (usuario.historial.fauna[especie] || 0) + 1;
-        console.log(`✅ Fauna.${especie}: ${usuario.historial.fauna[especie]}`);
-      } else if (tipo === "Flora") {
-        usuario.historial.flora[especie] = (usuario.historial.flora[especie] || 0) + 1;
-        console.log(`✅ Flora.${especie}: ${usuario.historial.flora[especie]}`);
-      }
+    // Asegurar estructura
+    if (!usuario.historial) usuario.historial = {
+      fauna: {},
+      flora: {}
+    };
 
-      await usuario.save();
-      console.log(`✅ Historial guardado`);
-      
-      // VERIFICAR PROGRESO INMEDIATAMENTE
-      await this.verificarProgreso(usuarioId);
-    } catch (error) {
-      console.error("❌ Error actualizando historial:", error);
+    // Listas de clasificación
+    const tiposFlora = ["Planta", "Árbol", "Hierba", "Hongo"];
+    // Asumimos que todo lo que no es flora, es fauna en tu sistema
+    const esFlora = tiposFlora.includes(tipo);
+
+    if (esFlora) {
+      // --- ESTRATEGIA FLORA: GENERAL (Por TIPO) ---
+      // Guardamos "Árbol", "Planta", etc. Ignoramos la especie específica.
+      const valorActual = usuario.historial.flora.get(tipo) || 0;
+      usuario.historial.flora.set(tipo, valorActual + 1);
+
+      console.log(`✅ Progreso Flora actualizado: ${tipo} = ${valorActual + 1}`);
+    } else {
+      // --- ESTRATEGIA FAUNA: ESPECÍFICA (Por ESPECIE) ---
+      // Guardamos "Iguana", "Águila", etc.
+      const valorActual = usuario.historial.fauna.get(especie) || 0;
+      usuario.historial.fauna.set(especie, valorActual + 1);
+
+      console.log(`✅ Progreso Fauna actualizado: ${especie} = ${valorActual + 1}`);
     }
+
+    await usuario.save();
+
+    // Verificamos si cumplió algún reto activo
+    await this.verificarProgreso(usuarioId);
+
+  } catch (error) {
+    console.error("❌ Error actualizando historial:", error);
   }
+}
 }
 
 export default new RetosService();
