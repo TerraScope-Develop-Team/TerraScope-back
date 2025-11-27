@@ -4,6 +4,72 @@ import FaunaFlora from "../models/fauna_flora.model.js";
 import observerService from "./observer.service.js";
 import cron from "node-cron";
 import moment from "moment-timezone";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+
+async function generarNombreDescripcionYCantidadIA(tipo, especie) {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
+    });
+
+   const prompt = `
+Eres un generador experto de desafíos ecológicos para una aplicación móvil.
+
+Genera un **nombre**, una **descripción corta** y un **número de avistamientos** para un reto relacionado con:
+
+- Tipo: ${tipo}
+- Categoría o especie: ${especie}
+
+REGLAS IMPORTANTES:
+1. Si "${especie}" es una CATEGORÍA general (como: Mamífero, Ave, Planta, Hongo, Reptil, Insecto, Árbol, Hierba, Arbusto, etc.):
+   - NO debes describir especies específicas.
+   - NO inventes animales o plantas concretas (nada de ardillas, colibríes, pinos, hongos específicos).
+   - Describe el reto de forma GENERAL para esa categoría.
+   - El nombre debe ser divertido y motivador, pero aplicado a la categoría completa, NO a una especie particular.
+
+2. Si "${especie}" es una ESPECIE específica:
+   - Sí puedes describir características reales de esa especie.
+   - Mantén el tono divertido y fácil de leer.
+
+3. El nombre debe ser llamativo, motivador y nada formal.
+4. La descripción debe ser breve (1–2 líneas), clara y basada SOLO en la categoría o especie dada.
+5. NO inventes datos científicos, NO inventes nombres.
+6. El número de avistamientos debe ser un entero entre 1 y 3 (solo para pruebas).
+
+Devuelve únicamente un JSON válido:
+
+{
+  "nombre": "texto",
+  "descripcion": "texto",
+  "avistamientos": numero
+}
+`;
+
+
+    const res = await model.generateContent([prompt]);
+    const raw = res.response.text().trim();
+
+    const clean = raw
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    return JSON.parse(clean);
+
+  } catch (err) {
+    console.error("Error IA generando nombre, descripción y cantidad:", err);
+
+    return {
+      nombre: `Reto de ${especie}`,
+      descripcion: `Registra avistamientos de ${especie} para completar el desafío.`,
+      avistamientos: 1
+    };
+  }
+}
+
 
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
@@ -19,15 +85,15 @@ this.inicializarCron();
 }
 
 inicializarCron() {
-// Ejecutar cada minuto para pruebas; luego cambiar a cada 6 horas
-cron.schedule("*/10 * * * *", async () => {
-console.log("🔄 Generando nuevos retos dinámicos...");
-await this.generarRetosAutomaticos();
-});
+  // Ejecutar cada 10 minutos
+  cron.schedule("*/10 * * * *", async () => {
+    console.log("🔄 Generando nuevos retos dinámicos...");
+    await this.generarRetosAutomaticos();
+  });
 
-console.log("✅ Cron job para retos configurado");
-
+  console.log("✅ Cron job para retos configurado (cada 10 minutos)");
 }
+
 
 async generarRetosAutomaticos() {
 try {
@@ -78,7 +144,8 @@ if (especiesPopulares.length === 0) {
 
   for (const tendencia of especiesParaRetos) {
     const { tipo, especie } = tendencia._id;
-    const cantidad = Math.max(5, Math.floor(tendencia.count * 0.3));
+    const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
+    const cantidad = ia.avistamientos; 
 
     // Finalizar retos activos anteriores de la misma especie
     const retosExistentes = await Reto.find({
@@ -102,8 +169,8 @@ if (especiesPopulares.length === 0) {
     const condicionKey = tipo === "Fauna" ? `fauna.${especie}` : `flora.${especie}`;
     const condiciones = { [condicionKey]: cantidad };
 
-    const nombreReto = `Explorador de ${especie}`;
-    const descripcionReto = `Registra ${cantidad} avistamientos de ${especie} en 3 minutos`;
+    const nombreReto = ia.nombre;
+    const descripcionReto = ia.descripcion;
 
     const nuevoReto = new Reto({
       nombre_reto: nombreReto,
@@ -166,10 +233,12 @@ for (const rareza of especiesRaras) {
   const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
 
   const condicionKey = tipo === "Fauna" ? `fauna.${especie}` : `flora.${especie}`;
-  const condiciones = { [condicionKey]: 1 };
+  const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
+  const cantidad = ia.avistamientos;
+  const condiciones = { [condicionKey]: cantidad };
 
-  const nombreReto = `Explorador raro: ${especie}`;
-  const descripcionReto = `Registra al menos 1 avistamiento de ${especie} en 3 minutos`;
+  const nombreReto = ia.nombre;
+  const descripcionReto = ia.descripcion;
 
   const nuevoReto = new Reto({
     nombre_reto: nombreReto,
