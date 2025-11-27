@@ -1,6 +1,7 @@
 import Usuario from "../models/usuario.model.js";
 
 // Crear un usuario
+
 export const crearUsuario = async (req, res) => {
   try {
     const {
@@ -117,5 +118,67 @@ export const eliminarUsuario = async (req, res) => {
       message: "Error al eliminar usuario",
       error: error.message
     });
+  }
+};
+
+export const seleccionarTituloActivo = async (req, res) => {
+  console.log('🔥 CONTROLADOR EJECUTADO'); // 👈 PRIMERO ESTO
+  console.log('📦 Body completo:', JSON.stringify(req.body)); 
+  try {
+    console.log('📦 Body recibido:', req.body);
+    const { usuarioId, logroId } = req.body;
+    console.log('Usuario ID:', usuarioId);
+    console.log('Logro ID:', logroId);
+   
+
+    const usuario = await Usuario.findById(usuarioId);
+    if (!usuario) {
+      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+    }
+
+    // Buscar el logro en el array de logros del usuario
+    const logro = usuario.logros.id(logroId);
+    if (!logro) {
+      return res.status(404).json({ mensaje: "Logro no encontrado" });
+    }
+
+    // Actualizar título activo
+    usuario.titulo_activo = {
+      id_logro: logro._id.toString(),
+      nombre_logro: logro.nombre_logro,
+      descripcion_titulo: logro.descripcion_titulo
+    };
+
+    await usuario.save();
+
+    res.status(200).json({
+      mensaje: "Título actualizado correctamente",
+      titulo_activo: usuario.titulo_activo
+    });
+  } catch (error) {
+    console.error("Error al seleccionar título:", error);
+    res.status(500).json({ mensaje: "Error del servidor" });
+  }
+};
+
+// Quitar título activo
+export const quitarTituloActivo = async (req, res) => {
+  try {
+    const { usuarioId } = req.body;
+
+    const usuario = await Usuario.findByIdAndUpdate(
+      usuarioId,
+      { $unset: { titulo_activo: "" } },
+      { new: true }
+    );
+
+    if (!usuario) {
+      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+    }
+
+    res.status(200).json({ mensaje: "Título removido correctamente" });
+  } catch (error) {
+    console.error("Error al quitar título:", error);
+    res.status(500).json({ mensaje: "Error del servidor" });
   }
 };
