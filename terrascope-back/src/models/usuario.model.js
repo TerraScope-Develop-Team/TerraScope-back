@@ -55,6 +55,11 @@ const UsuarioSchema = new mongoose.Schema({
       default: true
     }
   }],
+    titulo_activo: {
+    id_logro: { type: String },
+    nombre_logro: { type: String },
+    descripcion_titulo: { type: String },
+    },
   historial: {
     fauna: {
       Mamífero: { type: Number, default: 0 },
