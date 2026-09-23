@@ -1,0 +1,33 @@
+name: Asignación Aleatoria de Issues
+
+# Se ejecuta cada vez que se crea un nuevo issue
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  assign-randomly:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # Permiso necesario para poder asignar el issue
+      
+    steps:
+      - name: Elegir y asignar usuario al azar
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 1. Define aquí los nombres de usuario (handles) de tu equipo en GitHub
+            const teamMembers = ['CesarGlez', 'HelSk-AlejTo-16', 'RonaldoChavez76'];
+            
+            // 2. Selecciona uno de forma aleatoria
+            const randomAssignee = teamMembers[Math.floor(Math.random() * teamMembers.length)];
+            
+            console.log(`Asignando el issue a: ${randomAssignee}`);
+            
+            // 3. Asigna el usuario al issue actual usando la API de GitHub
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: [randomAssignee]
+            });
