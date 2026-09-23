@@ -1,33 +1,49 @@
 name: Asignación Aleatoria de Issues
 
-# Se ejecuta cada vez que se crea un nuevo issue
+# Esto crea un botón para ejecutarlo manualmente
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 jobs:
-  assign-randomly:
+  bulk-assign:
     runs-on: ubuntu-latest
     permissions:
-      issues: write # Permiso necesario para poder asignar el issue
+      issues: write
       
     steps:
-      - name: Elegir y asignar usuario al azar
+      - name: Buscar issues sin asignar y repartirlos al azar
         uses: actions/github-script@v7
         with:
           script: |
-            // 1. Define aquí los nombres de usuario (handles) de tu equipo en GitHub
             const teamMembers = ['CesarGlez', 'HelSk-AlejTo-16', 'RonaldoChavez76'];
             
-            // 2. Selecciona uno de forma aleatoria
-            const randomAssignee = teamMembers[Math.floor(Math.random() * teamMembers.length)];
-            
-            console.log(`Asignando el issue a: ${randomAssignee}`);
-            
-            // 3. Asigna el usuario al issue actual usando la API de GitHub
-            await github.rest.issues.addAssignees({
+            // 1. Obtener todos los issues abiertos del repositorio (usando paginate por si tienes muchos)
+            const allIssues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              assignees: [randomAssignee]
+              state: 'open'
             });
+            
+            // 2. Filtrar: Solo los que NO tienen a nadie asignado y que NO sean Pull Requests
+            const unassignedIssues = allIssues.filter(issue => !issue.assignee && !issue.pull_request);
+            
+            if (unassignedIssues.length === 0) {
+              console.log('Todo al día. No se encontraron issues sin asignar.');
+              return;
+            }
+            
+            console.log(`Se encontraron ${unassignedIssues.length} issues huérfanos. Comenzando a repartir...`);
+            
+            // 3. Recorrer cada issue filtrado y asignarle alguien al azar
+            for (const issue of unassignedIssues) {
+              const randomAssignee = teamMembers[Math.floor(Math.random() * teamMembers.length)];
+              
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: [randomAssignee]
+              });
+              
+              console.log(`✅ Issue #${issue.number} asignado a @${randomAssignee}`);
+            }
