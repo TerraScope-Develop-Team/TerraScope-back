@@ -11,7 +11,12 @@ import {
   votarValidacion,
   validarPorExperto,
   obtenerEstadoValidacion,
+  getAvistamientosCercanos,
+  getAvistamientosPorEspecie,
+  getAvistamientosPorUsuario,
+  updateAvistamiento,
 } from "../controllers/fauna_flora.controller.js";
+import { authenticate, requireRoles } from "../middleware/auth.middleware.js";
 
 // Autor: Leonel Torres
 // Fecha: 2025-10-03
@@ -19,19 +24,23 @@ import {
 
 
 router.get("/frequent-zones", getFrequentZones);
+router.get("/cerca/:latitud/:longitud/:distanciaKm", getAvistamientosCercanos);
+router.get("/especie/:especie", getAvistamientosPorEspecie);
+router.get("/usuario/:nombreUsuario", getAvistamientosPorUsuario);
 
 // CRUD de los avistamientos
-router.post("/", createAvistamiento);
+router.post("/", authenticate, createAvistamiento);
 router.get("/", getAvistamientos);
 router.get("/:id", getAvistamientoById);
-router.delete("/:id", deleteAvistamiento);
+router.put("/:id", authenticate, updateAvistamiento);
+router.delete("/:id", authenticate, deleteAvistamiento);
 
 // Rutas para la validación de especies
-router.put("/:id/votar", votarValidacion);
-router.put("/:id/validar-experto", validarPorExperto);
-router.get("/:id/validacion", obtenerEstadoValidacion);
+router.put("/:id/votar", authenticate, votarValidacion);
+router.put("/:id/validar-experto", authenticate, requireRoles("Administrador", "Investigador"), validarPorExperto);
+router.get("/:id/validacion", authenticate, obtenerEstadoValidacion);
 
 // Creación de los comentarios
-router.post("/:id/comentarios", addComentario);
+router.post("/:id/comentarios", authenticate, addComentario);
 
 export default router;

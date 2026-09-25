@@ -1,4 +1,5 @@
 import Usuario from "../models/usuario.model.js";
+import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 // Crear un usuario
 
@@ -16,7 +17,7 @@ export const crearUsuario = async (req, res) => {
 
     // Validar campos requeridos
     if (!nombre_usuario || !email_usuario || !contrasenia_usuario || !rol) {
-      return res.status(400).json({ message: "Faltan campos obligatorios" });
+      return respondWithError(res, 400, "USER_FIELDS_REQUIRED", "Faltan campos obligatorios");
     }
 
     // Crear el nuevo usuario
@@ -26,7 +27,10 @@ export const crearUsuario = async (req, res) => {
       contrasenia_usuario,
       telefono_usuario,
       fecha_nac_usuario,
-      rol,
+      rol: {
+        id_rol: rol.id_rol,
+        nombre_rol: "Usuario"
+      },
       imagen_perfil: imagen_perfil || "" // Si no se envía imagen, se guarda vacío
     });
 
@@ -36,39 +40,30 @@ export const crearUsuario = async (req, res) => {
       data: nuevoUsuario
     });
   } catch (error) {
-    res.status(400).json({
-      message: "Error al crear usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al crear usuario");
   }
 };
 
 // Obtener todos los usuarios
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const usuarios = await Usuario.find();
+    const usuarios = await Usuario.find().select("-contrasenia_usuario");
     res.status(200).json(usuarios);
   } catch (error) {
-    res.status(500).json({
-      message: "Error al obtener usuarios",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener usuarios");
   }
 };
 
 // Obtener un usuario por ID
 export const obtenerUsuarioPorId = async (req, res) => {
   try {
-    const usuario = await Usuario.findById(req.params.id);
+    const usuario = await Usuario.findById(req.params.id).select("-contrasenia_usuario");
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
     res.status(200).json(usuario);
   } catch (error) {
-    res.status(500).json({
-      message: "Error al obtener usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener usuario");
   }
 };
 
@@ -78,7 +73,17 @@ export const actualizarUsuario = async (req, res) => {
     const { imagen_perfil } = req.body;
 
     // Si se envía una imagen vacía, la ignoramos para no borrar la anterior
-    const updateData = { ...req.body };
+    const allowedFields = [
+      "nombre_usuario",
+      "telefono_usuario",
+      "fecha_nac_usuario",
+      "imagen_perfil"
+    ];
+    const updateData = Object.fromEntries(
+      allowedFields
+        .filter((field) => Object.hasOwn(req.body, field))
+        .map((field) => [field, req.body[field]])
+    );
     if (imagen_perfil === undefined || imagen_perfil === null) {
       delete updateData.imagen_perfil;
     }
@@ -90,7 +95,7 @@ export const actualizarUsuario = async (req, res) => {
     );
 
     if (!usuarioActualizado) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({
@@ -98,10 +103,7 @@ export const actualizarUsuario = async (req, res) => {
       data: usuarioActualizado
     });
   } catch (error) {
-    res.status(400).json({
-      message: "Error al actualizar usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al actualizar usuario");
   }
 };
 
@@ -110,36 +112,28 @@ export const eliminarUsuario = async (req, res) => {
   try {
     const usuarioEliminado = await Usuario.findByIdAndDelete(req.params.id);
     if (!usuarioEliminado) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
     res.status(200).json({ message: "Usuario eliminado correctamente" });
   } catch (error) {
-    res.status(500).json({
-      message: "Error al eliminar usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al eliminar usuario");
   }
 };
 
 export const seleccionarTituloActivo = async (req, res) => {
-  console.log('🔥 CONTROLADOR EJECUTADO'); // 👈 PRIMERO ESTO
-  console.log('📦 Body completo:', JSON.stringify(req.body)); 
   try {
-    console.log('📦 Body recibido:', req.body);
     const { usuarioId, logroId } = req.body;
-    console.log('Usuario ID:', usuarioId);
-    console.log('Logro ID:', logroId);
    
 
     const usuario = await Usuario.findById(usuarioId);
     if (!usuario) {
-      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     // Buscar el logro en el array de logros del usuario
     const logro = usuario.logros.id(logroId);
     if (!logro) {
-      return res.status(404).json({ mensaje: "Logro no encontrado" });
+      return respondWithError(res, 404, "ACHIEVEMENT_NOT_FOUND", "Logro no encontrado");
     }
 
     // Actualizar título activo
@@ -156,8 +150,7 @@ export const seleccionarTituloActivo = async (req, res) => {
       titulo_activo: usuario.titulo_activo
     });
   } catch (error) {
-    console.error("Error al seleccionar título:", error);
-    res.status(500).json({ mensaje: "Error del servidor" });
+    return respondWithControllerError(res, error, "Error al seleccionar título");
   }
 };
 
@@ -173,12 +166,11 @@ export const quitarTituloActivo = async (req, res) => {
     );
 
     if (!usuario) {
-      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({ mensaje: "Título removido correctamente" });
   } catch (error) {
-    console.error("Error al quitar título:", error);
-    res.status(500).json({ mensaje: "Error del servidor" });
+    return respondWithControllerError(res, error, "Error al quitar título");
   }
 };

@@ -10,6 +10,12 @@ import {
   obtenerProgresoReto,
   crearRetoManual
 } from "../controllers/retos.controller.js";
+import {
+  authenticate,
+  requireBodyUserOrAdmin,
+  requireParamUserOrAdmin,
+  requireRoles
+} from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
@@ -20,24 +26,24 @@ router.get("/activos", obtenerRetosActivos);
 router.get("/:id", obtenerRetoById);
 
 // Inscribirse a un reto
-router.post("/inscribirse", inscribirseReto);
+router.post("/inscribirse", authenticate, requireBodyUserOrAdmin(), inscribirseReto);
 
 // Desinscribirse de un reto
-router.post("/desinscribirse", desinscribirseReto);
+router.post("/desinscribirse", authenticate, requireBodyUserOrAdmin(), desinscribirseReto);
 
 // Obtener tabla de posiciones
 router.get("/:retoId/posiciones", obtenerTablaPosiciones);
 
 // Obtener logros de un usuario
-router.get("/usuario/:usuarioId/logros", obtenerLogrosUsuario);
+router.get("/usuario/:usuarioId/logros", authenticate, requireParamUserOrAdmin(), obtenerLogrosUsuario);
 
 // Cambiar visibilidad de logro
-router.patch("/logro/visibilidad", toggleMostrarLogro);
+router.patch("/logro/visibilidad", authenticate, requireBodyUserOrAdmin(), toggleMostrarLogro);
 
 // Obtener progreso en un reto
-router.get("/:retoId/progreso/:usuarioId", obtenerProgresoReto);
+router.get("/:retoId/progreso/:usuarioId", authenticate, requireParamUserOrAdmin(), obtenerProgresoReto);
 
 // Crear reto manual (admin)
-router.post("/crear", crearRetoManual);
+router.post("/crear", authenticate, requireRoles("Administrador"), crearRetoManual);
 
 export default router;
