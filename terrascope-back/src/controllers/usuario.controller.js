@@ -1,8 +1,8 @@
+import mongoose from "mongoose";
 import Usuario from "../models/usuario.model.js";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 // Crear un usuario
-
 export const crearUsuario = async (req, res) => {
   try {
     const {
@@ -12,7 +12,7 @@ export const crearUsuario = async (req, res) => {
       telefono_usuario,
       fecha_nac_usuario,
       rol,
-      imagen_perfil // 🖼️ Nuevo campo
+      imagen_perfil
     } = req.body;
 
     // Validar campos requeridos
@@ -29,9 +29,9 @@ export const crearUsuario = async (req, res) => {
       fecha_nac_usuario,
       rol: {
         id_rol: rol.id_rol,
-        nombre_rol: "Usuario"
+        nombre_rol: rol.nombre_rol || "Usuario"
       },
-      imagen_perfil: imagen_perfil || "" // Si no se envía imagen, se guarda vacío
+      imagen_perfil: imagen_perfil || ""
     });
 
     await nuevoUsuario.save();
@@ -54,14 +54,37 @@ export const obtenerUsuarios = async (req, res) => {
   }
 };
 
-// Obtener un usuario por ID
+// Obtener un usuario por ID (incluye conteo de seguidores y seguidos para el perfil)
 export const obtenerUsuarioPorId = async (req, res) => {
   try {
-    const usuario = await Usuario.findById(req.params.id).select("-contrasenia_usuario");
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
+    }
+
+    const usuario = await Usuario.findById(req.params.id)
+      .select("-contrasenia_usuario")
+      .populate("seguidores", "nombre_usuario imagen_perfil")
+      .populate("seguidos", "nombre_usuario imagen_perfil");
+
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
-    res.status(200).json(usuario);
+
+    const usuarioObj = usuario.toObject();
+    usuarioObj.total_seguidores = usuario.seguidores ? usuario.seguidores.length : 0;
+    usuarioObj.total_seguidos = usuario.seguidos ? usuario.seguidos.length : 0;
+
+    // Verificar si el usuario autenticado ya sigue a este perfil
+    const currentUserId = req.user?._id?.toString() || req.query.currentUserId || req.query.id_usuario;
+    if (currentUserId && usuario.seguidores) {
+      usuarioObj.is_following = usuario.seguidores.some(
+        (seg) => (seg._id ? seg._id.toString() : seg.toString()) === currentUserId.toString()
+      );
+    } else {
+      usuarioObj.is_following = false;
+    }
+
+    res.status(200).json(usuarioObj);
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener usuario");
   }
@@ -72,7 +95,6 @@ export const actualizarUsuario = async (req, res) => {
   try {
     const { imagen_perfil } = req.body;
 
-    // Si se envía una imagen vacía, la ignoramos para no borrar la anterior
     const allowedFields = [
       "nombre_usuario",
       "telefono_usuario",
@@ -123,20 +145,17 @@ export const eliminarUsuario = async (req, res) => {
 export const seleccionarTituloActivo = async (req, res) => {
   try {
     const { usuarioId, logroId } = req.body;
-   
 
     const usuario = await Usuario.findById(usuarioId);
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    // Buscar el logro en el array de logros del usuario
     const logro = usuario.logros.id(logroId);
     if (!logro) {
       return respondWithError(res, 404, "ACHIEVEMENT_NOT_FOUND", "Logro no encontrado");
     }
 
-    // Actualizar título activo
     usuario.titulo_activo = {
       id_logro: logro._id.toString(),
       nombre_logro: logro.nombre_logro,
@@ -172,5 +191,147 @@ export const quitarTituloActivo = async (req, res) => {
     res.status(200).json({ mensaje: "Título removido correctamente" });
   } catch (error) {
     return respondWithControllerError(res, error, "Error al quitar título");
+  }
+};
+
+// Seguir a un usuario
+export const seguirUsuario = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
+
+    if (!followerId) {
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
+    }
+
+    if (targetId.toString() === followerId.toString()) {
+      return respondWithError(res, 400, "CANNOT_FOLLOW_SELF", "No puedes seguirte a ti mismo");
+    }
+
+    const [targetUser, followerUser] = await Promise.all([
+      Usuario.findById(targetId),
+      Usuario.findById(followerId)
+    ]);
+
+    if (!targetUser || !followerUser) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    // Agregar de forma atómica evitando duplicados
+    await Promise.all([
+      Usuario.findByIdAndUpdate(followerId, { $addToSet: { seguidos: targetId } }),
+      Usuario.findByIdAndUpdate(targetId, { $addToSet: { seguidores: followerId } })
+    ]);
+
+    const updatedTarget = await Usuario.findById(targetId);
+    const updatedFollower = await Usuario.findById(followerId);
+
+    res.status(200).json({
+      message: `Ahora sigues a ${targetUser.nombre_usuario}`,
+      following: true,
+      total_seguidores: updatedTarget.seguidores ? updatedTarget.seguidores.length : 0,
+      total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al seguir usuario");
+  }
+};
+
+// Dejar de seguir a un usuario
+export const dejarDeSeguirUsuario = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
+
+    if (!followerId) {
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
+    }
+
+    const [targetUser, followerUser] = await Promise.all([
+      Usuario.findById(targetId),
+      Usuario.findById(followerId)
+    ]);
+
+    if (!targetUser || !followerUser) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    // Remover de forma atómica
+    await Promise.all([
+      Usuario.findByIdAndUpdate(followerId, { $pull: { seguidos: targetId } }),
+      Usuario.findByIdAndUpdate(targetId, { $pull: { seguidores: followerId } })
+    ]);
+
+    const updatedTarget = await Usuario.findById(targetId);
+    const updatedFollower = await Usuario.findById(followerId);
+
+    res.status(200).json({
+      message: `Has dejado de seguir a ${targetUser.nombre_usuario}`,
+      following: false,
+      total_seguidores: updatedTarget.seguidores ? updatedTarget.seguidores.length : 0,
+      total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al dejar de seguir usuario");
+  }
+};
+
+// Obtener lista de seguidores de un usuario
+export const obtenerSeguidores = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
+    }
+
+    const usuario = await Usuario.findById(id).populate(
+      "seguidores",
+      "nombre_usuario email_usuario imagen_perfil rol"
+    );
+
+    if (!usuario) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    res.status(200).json({
+      seguidores: usuario.seguidores || [],
+      total: usuario.seguidores ? usuario.seguidores.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener seguidores");
+  }
+};
+
+// Obtener lista de usuarios seguidos
+export const obtenerSeguidos = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
+    }
+
+    const usuario = await Usuario.findById(id).populate(
+      "seguidos",
+      "nombre_usuario email_usuario imagen_perfil rol"
+    );
+
+    if (!usuario) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    res.status(200).json({
+      seguidos: usuario.seguidos || [],
+      total: usuario.seguidos ? usuario.seguidos.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener seguidos");
   }
 };

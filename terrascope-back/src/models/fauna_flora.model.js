@@ -52,10 +52,15 @@ const faunaFloraSchema = new mongoose.Schema({
         descripcion_habitat: { type: String }
     },
     comentarios: [{
-        id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "usuarios", required: false },
+        id_usuario: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: false },
         nombre_usuario: { type: String, required: true },
+        imagen_perfil: { type: String, default: "" },
         comentario: { type: String, required: true },
-        fecha: { type: Date, required: true }
+        fecha: { type: Date, default: Date.now }
+    }],
+    likes: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Usuario"
     }],
     validacion: {
         estado: {
@@ -74,16 +79,28 @@ const faunaFloraSchema = new mongoose.Schema({
         usuarios_validadores: [
             {
                 type: mongoose.Schema.Types.ObjectId,
-                ref: "usuarios",
+                ref: "Usuario",
             },
         ],
         validado_por_experto: {
             type: Boolean,
             default: false,
-            
         },
     },
+}, {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+faunaFloraSchema.virtual("total_likes").get(function () {
+    return this.likes ? this.likes.length : 0;
+});
+
+faunaFloraSchema.virtual("total_comentarios").get(function () {
+    return this.comentarios ? this.comentarios.length : 0;
 });
 
 const fauna_flora = mongoose.model("FaunaFlora", faunaFloraSchema, "fauna_flora");
 export default fauna_flora;
+
