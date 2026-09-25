@@ -9,7 +9,12 @@ import iaRoutes from "./routes/ia.routes.js";
 import retosRoutes from "./routes/retos.routes.js";
 import retosService from "./services/retos.service.js";
 
+import { setupSwagger } from "./config/swagger.js";
+
 const app = express();
+
+// Configurar Swagger
+setupSwagger(app);
 
 // Middlewares
 app.use(cors());

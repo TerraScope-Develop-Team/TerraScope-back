@@ -1,6 +1,4 @@
-import FaunaFlora from "../models/fauna_flora.model.js";
-import Habitat from "../models/habitat.model.js";
-import mongoose from "mongoose";
+import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
 
 // Crear avistamiento
@@ -19,14 +17,13 @@ export const createAvistamiento = async (req, res) => {
       comportamiento,
       estado_extincion,
       estado_especimen,
-      habitat,  // ← CORREGIDO: era "habitad"
-      tipo,     // ← AGREGADO: faltaba extraer
-      nombre_usuario,  // ← AGREGADO: faltaba extraer
-      id_usuario,  // ← AGREGADO: faltaba extraer
-      validacion  // ← AGREGADO: faltaba extraer (opcional)
+      habitat,
+      tipo,
+      nombre_usuario,
+      id_usuario,
+      validacion
     } = req.body;
 
-    // Validar que habitat existe y tiene id_habitat
     if (!habitat || !habitat.id_habitat) {
       console.log('❌ Habitat no proporcionado o sin ID');
       return res.status(400).json({ 
@@ -34,18 +31,10 @@ export const createAvistamiento = async (req, res) => {
       });
     }
 
-    console.log('🔍 Validando habitat con ID:', habitat.id_habitat);
-
-    // Validar que el ID es un ObjectId válido
-    if (!mongoose.Types.ObjectId.isValid(habitat.id_habitat)) {
-      console.log('❌ ID de habitat NO es válido');
-      return res.status(400).json({ 
-        message: "ID de habitat inválido" 
-      });
-    }
-
     // Buscar el habitat en la base de datos
-    const habitatExiste = await Habitat.findById(habitat.id_habitat); // ← CORREGIDO: era "habitad.id_habitad"
+    const habitatExiste = await prisma.habitat.findUnique({
+      where: { id: habitat.id_habitat }
+    });
     
     if (!habitatExiste) {
       console.log('❌ Habitat no encontrado en la base de datos');
@@ -56,55 +45,56 @@ export const createAvistamiento = async (req, res) => {
 
     console.log('✅ Habitat encontrado:', habitatExiste.nombre_habitat);
 
-    // Convertir id_habitat a ObjectId
-    const habitatData = {
-      id_habitat: new mongoose.Types.ObjectId(habitat.id_habitat),
-      nombre_habitat: habitat.nombre_habitat,
-      descripcion_habitat: habitat.descripcion_habitat
-    };
-
     console.log('💾 Creando nuevo avistamiento...');
 
-    const nuevoAvistamiento = new FaunaFlora({
-      nombre_comun,
-      nombre_cientifico,
-      especie,
-      descripcion,
-      imagen,
-      ubicacion,
-      comportamiento,
-      estado_extincion,
-      estado_especimen,
-      habitat: habitatData,  // ← CORREGIDO: era "habitad"
-      tipo,
-      nombre_usuario,
-      id_usuario,
-      validacion: validacion || {  // ← Usar valores por defecto si no viene
-        estado: "pendiente",
-        votos_comunidad: 0,
-        requeridos_comunidad: 5,
-        usuarios_validadores: [],
-        validado_por_experto: false
+    const nuevoAvistamiento = await prisma.faunaFlora.create({
+      data: {
+        nombre_comun,
+        nombre_cientifico,
+        especie,
+        descripcion,
+        imagen,
+        ubicacion: {
+          latitud: ubicacion.latitud,
+          longitud: ubicacion.longitud
+        },
+        comportamiento,
+        estado_extincion,
+        estado_especimen,
+        habitat: {
+          set: {
+            id_habitat: habitat.id_habitat,
+            nombre_habitat: habitat.nombre_habitat,
+            descripcion_habitat: habitat.descripcion_habitat
+          }
+        },
+        tipo,
+        nombre_usuario,
+        id_usuario: id_usuario || null,
+        validacion: {
+          set: {
+            estado: validacion?.estado || "pendiente",
+            votos_comunidad: validacion?.votos_comunidad || 0,
+            requeridos_comunidad: validacion?.requeridos_comunidad || 5,
+            validado_por_experto: validacion?.validado_por_experto || false
+          }
+        }
       }
     });
-
-    console.log('💾 Guardando en base de datos...');
-    await nuevoAvistamiento.save();
     
-    console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento._id);
-    // Al final de createAvistamiento, antes del res.status(201).json
-try {
-  if (nuevoAvistamiento.id_usuario) {
-    await retosService.actualizarHistorial(
-      nuevoAvistamiento.id_usuario,
-      nuevoAvistamiento.tipo,
-      nuevoAvistamiento.especie
-    );
-  }
-} catch (error) {
-  console.error("❌ Error actualizando historial:", error);
-}
-
+    console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento.id);
+    
+    try {
+      if (nuevoAvistamiento.id_usuario) {
+        await retosService.actualizarHistorial(
+          nuevoAvistamiento.id_usuario,
+          nuevoAvistamiento.tipo,
+          nuevoAvistamiento.especie
+        );
+      }
+    } catch (error) {
+      console.error("❌ Error actualizando historial:", error);
+    }
 
     res.status(201).json({
       message: "Avistamiento creado exitosamente",
@@ -113,18 +103,6 @@ try {
 
   } catch (error) {
     console.error('❌ Error completo:', error);
-    console.error('❌ Error name:', error.name);
-    console.error('❌ Error message:', error.message);
-    
-    // Manejar errores de validación de Mongoose
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({ 
-        message: "Error de validación",
-        detalles: messages
-      });
-    }
-
     res.status(500).json({ 
       message: "Error al crear un avistamiento", 
       error: error.message 
@@ -139,9 +117,11 @@ export const getAvistamientos = async (req, res) => {
     let filter = {};
     if (especie) filter.especie = especie;
     if (categoria) {
-      filter.especie = categoria; // Adjust as needed
+      filter.especie = categoria; 
     }
-    const avistamientos = await FaunaFlora.find(filter);
+    const avistamientos = await prisma.faunaFlora.findMany({
+      where: filter
+    });
     res.status(200).json(avistamientos);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
@@ -155,7 +135,9 @@ export const getAvistamientos = async (req, res) => {
 // Obtener por ID
 export const getAvistamientoById = async (req, res) => {
   try {
-    const avistamiento = await FaunaFlora.findById(req.params.id);
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: req.params.id }
+    });
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
@@ -180,28 +162,38 @@ export const addComentario = async (req, res) => {
       });
     }
 
-    const avistamiento = await FaunaFlora.findById(req.params.id);
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: req.params.id }
+    });
     
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    const nuevoComentario = {
-      nombre_usuario, 
-      comentario, 
-      fecha: new Date()
-    };
-
+    let validIdUsuario = null;
     if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
       if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
-        nuevoComentario.id_usuario = id_usuario;
+        validIdUsuario = id_usuario;
       }
     }
 
-    avistamiento.comentarios.push(nuevoComentario);
-    await avistamiento.save();
+    const nuevoComentario = {
+      nombre_usuario, 
+      comentario, 
+      fecha: new Date(),
+      id_usuario: validIdUsuario
+    };
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: req.params.id },
+      data: {
+        comentarios: {
+          push: nuevoComentario
+        }
+      }
+    });
     
-    res.status(200).json(avistamiento);
+    res.status(200).json(updatedAvistamiento);
   } catch (error) {
     console.error("❌ Error al agregar comentario:", error);
     res.status(500).json({ 
@@ -213,10 +205,9 @@ export const addComentario = async (req, res) => {
 
 export const deleteAvistamiento = async (req, res) => {
   try {
-    const avistamiento = await FaunaFlora.findByIdAndDelete(req.params.id);
-    if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
-    }
+    const avistamiento = await prisma.faunaFlora.delete({
+      where: { id: req.params.id }
+    });
     res.status(200).json({ message: "Avistamiento eliminado correctamente" });
   } catch (error) {
     console.error('❌ Error al eliminar avistamiento:', error);
@@ -229,26 +220,29 @@ export const deleteAvistamiento = async (req, res) => {
 
 export const getFrequentZones = async (req, res) => {
   try {
-    const frequentZones = await FaunaFlora.aggregate([
-      {
-        $group: {
-          _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
-          count: { $sum: 1 }
+    // Prisma mongo raw aggregation
+    const frequentZones = await prisma.faunaFlora.aggregateRaw({
+      pipeline: [
+        {
+          $group: {
+            _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: { count: { $gt: 1 } }
+        },
+        {
+          $project: {
+            lat: "$_id.lat",
+            lng: "$_id.lng",
+            especie: "$_id.especie",
+            count: 1,
+            _id: 0
+          }
         }
-      },
-      {
-        $match: { count: { $gt: 1 } }
-      },
-      {
-        $project: {
-          lat: "$_id.lat",
-          lng: "$_id.lng",
-          especie: "$_id.especie",
-          count: 1,
-          _id: 0
-        }
-      }
-    ]);
+      ]
+    });
     res.status(200).json(frequentZones);
   } catch (error) {
     console.error('❌ Error al obtener zonas frecuentes:', error);
@@ -269,32 +263,48 @@ export const votarValidacion = async (req, res) => {
       return res.status(400).json({ message: "Se requiere el id_usuario" });
     }
 
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario) {
+    if (avistamiento.id_usuario && avistamiento.id_usuario === id_usuario) {
       return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
     }
 
-    if (avistamiento.validacion.usuarios_validadores.includes(id_usuario)) {
+    if (avistamiento.usuarios_validadores_ids.includes(id_usuario)) {
       return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
     }
 
-    avistamiento.validacion.usuarios_validadores.push(id_usuario);
-    avistamiento.validacion.votos_comunidad += 1;
+    const nuevosVotos = (avistamiento.validacion?.votos_comunidad || 0) + 1;
+    let nuevoEstado = avistamiento.validacion?.estado || "pendiente";
 
-    if (avistamiento.validacion.votos_comunidad >= avistamiento.validacion.requeridos_comunidad) {
-      avistamiento.validacion.estado = "validado_comunidad";
+    if (nuevosVotos >= (avistamiento.validacion?.requeridos_comunidad || 5)) {
+      nuevoEstado = "validado_comunidad";
     }
 
-    await avistamiento.save();
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: avistamientoId },
+      data: {
+        usuarios_validadores_ids: {
+          push: id_usuario
+        },
+        validacion: {
+          estado: nuevoEstado,
+          votos_comunidad: nuevosVotos,
+          requeridos_comunidad: avistamiento.validacion?.requeridos_comunidad || 5,
+          validado_por_experto: avistamiento.validacion?.validado_por_experto || false
+        }
+      }
+    });
 
     res.status(200).json({
       message: "Voto registrado correctamente",
-      estado_actual: avistamiento.validacion.estado,
-      votos_comunidad: avistamiento.validacion.votos_comunidad,
+      estado_actual: updatedAvistamiento.validacion.estado,
+      votos_comunidad: updatedAvistamiento.validacion.votos_comunidad,
     });
 
   } catch (error) {
@@ -320,19 +330,29 @@ export const validarPorExperto = async (req, res) => {
       return res.status(403).json({ message: "Usuario no autorizado para validar como experto" });
     }
 
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    avistamiento.validacion.validado_por_experto = true;
-    avistamiento.validacion.estado = "validado_experto";
-
-    await avistamiento.save();
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: avistamientoId },
+      data: {
+        validacion: {
+          estado: "validado_experto",
+          votos_comunidad: avistamiento.validacion?.votos_comunidad || 0,
+          requeridos_comunidad: avistamiento.validacion?.requeridos_comunidad || 5,
+          validado_por_experto: true
+        }
+      }
+    });
 
     res.status(200).json({
       message: "Avistamiento validado por experto",
-      estado_actual: avistamiento.validacion.estado,
+      estado_actual: updatedAvistamiento.validacion.estado,
     });
 
   } catch (error) {
@@ -347,24 +367,27 @@ export const validarPorExperto = async (req, res) => {
 export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const userId = req.query.userId; // o req.body.userId
+    const userId = req.query.userId;
 
     if (!userId) return res.status(400).json({ message: 'Falta el userId' });
 
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
     const validacion = avistamiento.validacion;
-    const yaVoto = validacion.usuarios_validadores?.includes(userId) ?? false;
+    const yaVoto = avistamiento.usuarios_validadores_ids?.includes(userId) ?? false;
 
     res.status(200).json({
-      estado: validacion.estado,
-      votos_comunidad: validacion.votos_comunidad,
-      requeridos_comunidad: validacion.requeridos_comunidad,
-      validado_por_experto: validacion.validado_por_experto,
-      usuarios_validadores: validacion.usuarios_validadores,
+      estado: validacion?.estado || "pendiente",
+      votos_comunidad: validacion?.votos_comunidad || 0,
+      requeridos_comunidad: validacion?.requeridos_comunidad || 5,
+      validado_por_experto: validacion?.validado_por_experto || false,
+      usuarios_validadores: avistamiento.usuarios_validadores_ids || [],
       yaVoto,
     });
   } catch (error) {
@@ -372,5 +395,3 @@ export const obtenerEstadoValidacion = async (req, res) => {
     res.status(500).json({ message: "Error al obtener estado", error: error.message });
   }
 };
-
-

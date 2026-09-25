@@ -1,0 +1,159 @@
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Usuario {
+  id                  String       @id @default(auto()) @map("_id") @db.ObjectId
+  nombre_usuario      String
+  email_usuario       String       @unique
+  contrasenia_usuario String
+  telefono_usuario    String?
+  fecha_nac_usuario   DateTime?
+  imagen_perfil       String?
+  rol                 Rol
+  logros              Logro[]
+  titulo_activo       TituloActivo?
+  historial           Historial?
+  retos_activos       String[]     @db.ObjectId
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  FaunaFlora            FaunaFlora[]
+  FaunaFloraComentarios FaunaFloraComentario[]
+  faunaFloraValidadoresIds String[] @db.ObjectId
+  FaunaFloraValidadores FaunaFlora[]           @relation("Validadores", fields: [faunaFloraValidadoresIds], references: [id])
+  RetosInscritos        Reto[]                 @relation("RetosUsuariosInscritos", fields: [retos_activos], references: [id])
+  RetosFinalizados      RetoFinalizado[]
+  
+  @@map("usuarios")
+}
+
+enum Rol {
+  Usuario
+  Investigador
+  Experto
+  Administrador
+}
+
+type Logro {
+  id_reto_base       String?  @db.ObjectId
+  nombre_logro       String?
+  descripcion_titulo String?
+  fecha_obtencion    DateTime @default(now())
+  es_mostrado        Boolean  @default(true)
+}
+
+type TituloActivo {
+  id_logro           String?
+  nombre_logro       String?
+  descripcion_titulo String?
+}
+
+type Historial {
+  fauna HistorialFauna?
+  flora HistorialFlora?
+}
+
+type HistorialFauna {
+  Mamifero Int @default(0)
+  Ave      Int @default(0)
+  Reptil   Int @default(0)
+  Anfibio  Int @default(0)
+  Pez      Int @default(0)
+  Insecto  Int @default(0)
+}
+
+type HistorialFlora {
+  Planta Int @default(0)
+  Arbol  Int @default(0)
+  Hierba Int @default(0)
+  Hongo  Int @default(0)
+}
+
+model Habitat {
+  id                  String @id @default(auto()) @map("_id") @db.ObjectId
+  nombre_habitat      String
+  descripcion_habitat String
+
+  @@map("habitat")
+}
+
+model FaunaFlora {
+  id                String       @id @default(auto()) @map("_id") @db.ObjectId
+  nombre_comun      String
+  nombre_cientifico String
+  especie           String
+  descripcion       String
+  tipo              String
+  nombre_usuario    String
+  id_usuario        String?      @db.ObjectId
+  usuario           Usuario?     @relation(fields: [id_usuario], references: [id])
+  imagen            String
+  ubicacion         Ubicacion
+  comportamiento    String
+  estado_extincion  String
+  estado_especimen  String
+  habitat           FaunaFloraHabitat?
+  comentarios       FaunaFloraComentario[]
+  validacion        Validacion?
+
+  // Many-to-many para validadores
+  usuarios_validadores_ids String[]  @db.ObjectId
+  usuarios_validadores     Usuario[] @relation("Validadores", fields: [usuarios_validadores_ids], references: [id])
+
+  @@map("fauna_flora")
+}
+
+type Ubicacion {
+  latitud  Float
+  longitud Float
+}
+
+type FaunaFloraHabitat {
+  id_habitat          String? @db.ObjectId
+  nombre_habitat      String?
+  descripcion_habitat String?
+}
+
+type FaunaFloraComentario {
+  id_usuario     String?  @db.ObjectId
+  nombre_usuario String
+  comentario     String
+  fecha          DateTime
+}
+
+type Validacion {
+  estado               String   @default("pendiente")
+  votos_comunidad      Int      @default(0)
+  requeridos_comunidad Int      @default(5)
+  validado_por_experto Boolean  @default(false)
+}
+
+model Reto {
+  id                   String             @id @default(auto()) @map("_id") @db.ObjectId
+  nombre_reto          String
+  descripcion_reto     String
+  fecha_inicio         DateTime?
+  fecha_final          DateTime?
+  condiciones          Json
+  usuarios_inscritos   String[]           @db.ObjectId
+  usuarios             Usuario[]          @relation("RetosUsuariosInscritos", fields: [usuarios_inscritos], references: [id])
+  usuarios_finalizados RetoFinalizado[]
+  estado               String             @default("activo")
+  es_temporal          Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@map("retos")
+}
+
+type RetoFinalizado {
+  usuario_id       String?   @db.ObjectId
+  fecha_completado DateTime? @default(now())
+  posicion         Int?
+}
