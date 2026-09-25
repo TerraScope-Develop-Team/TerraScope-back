@@ -12,26 +12,32 @@ import {
   obtenerSeguidores,
   obtenerSeguidos
 } from "../controllers/usuario.controller.js";
+import {
+  authenticate,
+  requireBodyUserOrAdmin,
+  requireRoles,
+  requireSelfOrAdmin
+} from "../middleware/auth.middleware.js";
 
 const router = Router();
 
-router.patch("/titulo-activo", seleccionarTituloActivo);
-router.delete("/titulo-activo", quitarTituloActivo);
+router.patch("/titulo-activo", authenticate, requireBodyUserOrAdmin(), seleccionarTituloActivo);
+router.delete("/titulo-activo", authenticate, requireBodyUserOrAdmin(), quitarTituloActivo);
 
 router.post("/", crearUsuario);
-router.get("/", obtenerUsuarios);
+router.get("/", authenticate, requireRoles("Administrador"), obtenerUsuarios);
 
-// Rutas de seguidores y seguidos (antes de /:id para evitar colisiones)
-router.get("/:id/seguidores", obtenerSeguidores);
-router.get("/:id/seguidos", obtenerSeguidos);
-router.post("/:id/seguir", seguirUsuario);
-router.post("/:id/follow", seguirUsuario); // Alias
-router.post("/:id/dejar-seguir", dejarDeSeguirUsuario);
-router.post("/:id/unfollow", dejarDeSeguirUsuario); // Alias
+// Rutas sociales de seguidores y seguidos (antes de /:id para evitar colisiones)
+router.get("/:id/seguidores", authenticate, obtenerSeguidores);
+router.get("/:id/seguidos", authenticate, obtenerSeguidos);
+router.post("/:id/seguir", authenticate, seguirUsuario);
+router.post("/:id/follow", authenticate, seguirUsuario); // Alias
+router.post("/:id/dejar-seguir", authenticate, dejarDeSeguirUsuario);
+router.post("/:id/unfollow", authenticate, dejarDeSeguirUsuario); // Alias
 
-// CRUD de usuario
-router.get("/:id", obtenerUsuarioPorId);
-router.patch("/:id", actualizarUsuario);
-router.delete("/:id", eliminarUsuario);
+// Perfil y CRUD de usuario
+router.get("/:id", authenticate, obtenerUsuarioPorId);
+router.patch("/:id", authenticate, requireSelfOrAdmin, actualizarUsuario);
+router.delete("/:id", authenticate, requireRoles("Administrador"), eliminarUsuario);
 
-export default router;
+export default router;

@@ -1,8 +1,8 @@
-import Usuario from "../models/usuario.model.js";
 import mongoose from "mongoose";
+import Usuario from "../models/usuario.model.js";
+import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 // Crear un usuario
-
 export const crearUsuario = async (req, res) => {
   try {
     const {
@@ -12,12 +12,12 @@ export const crearUsuario = async (req, res) => {
       telefono_usuario,
       fecha_nac_usuario,
       rol,
-      imagen_perfil // 🖼️ Nuevo campo
+      imagen_perfil
     } = req.body;
 
     // Validar campos requeridos
     if (!nombre_usuario || !email_usuario || !contrasenia_usuario || !rol) {
-      return res.status(400).json({ message: "Faltan campos obligatorios" });
+      return respondWithError(res, 400, "USER_FIELDS_REQUIRED", "Faltan campos obligatorios");
     }
 
     // Crear el nuevo usuario
@@ -27,8 +27,11 @@ export const crearUsuario = async (req, res) => {
       contrasenia_usuario,
       telefono_usuario,
       fecha_nac_usuario,
-      rol,
-      imagen_perfil: imagen_perfil || "" // Si no se envía imagen, se guarda vacío
+      rol: {
+        id_rol: rol.id_rol,
+        nombre_rol: rol.nombre_rol || "Usuario"
+      },
+      imagen_perfil: imagen_perfil || ""
     });
 
     await nuevoUsuario.save();
@@ -37,23 +40,17 @@ export const crearUsuario = async (req, res) => {
       data: nuevoUsuario
     });
   } catch (error) {
-    res.status(400).json({
-      message: "Error al crear usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al crear usuario");
   }
 };
 
 // Obtener todos los usuarios
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const usuarios = await Usuario.find();
+    const usuarios = await Usuario.find().select("-contrasenia_usuario");
     res.status(200).json(usuarios);
   } catch (error) {
-    res.status(500).json({
-      message: "Error al obtener usuarios",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener usuarios");
   }
 };
 
@@ -61,23 +58,24 @@ export const obtenerUsuarios = async (req, res) => {
 export const obtenerUsuarioPorId = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: "ID de usuario inválido" });
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     const usuario = await Usuario.findById(req.params.id)
+      .select("-contrasenia_usuario")
       .populate("seguidores", "nombre_usuario imagen_perfil")
       .populate("seguidos", "nombre_usuario imagen_perfil");
 
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     const usuarioObj = usuario.toObject();
     usuarioObj.total_seguidores = usuario.seguidores ? usuario.seguidores.length : 0;
     usuarioObj.total_seguidos = usuario.seguidos ? usuario.seguidos.length : 0;
 
-    // Verificar si el usuario consultante ya lo sigue
-    const currentUserId = req.usuario?._id || req.query.currentUserId || req.query.id_usuario;
+    // Verificar si el usuario autenticado ya sigue a este perfil
+    const currentUserId = req.user?._id?.toString() || req.query.currentUserId || req.query.id_usuario;
     if (currentUserId && usuario.seguidores) {
       usuarioObj.is_following = usuario.seguidores.some(
         (seg) => (seg._id ? seg._id.toString() : seg.toString()) === currentUserId.toString()
@@ -88,21 +86,26 @@ export const obtenerUsuarioPorId = async (req, res) => {
 
     res.status(200).json(usuarioObj);
   } catch (error) {
-    res.status(500).json({
-      message: "Error al obtener usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener usuario");
   }
 };
-
 
 // Actualizar un usuario
 export const actualizarUsuario = async (req, res) => {
   try {
     const { imagen_perfil } = req.body;
 
-    // Si se envía una imagen vacía, la ignoramos para no borrar la anterior
-    const updateData = { ...req.body };
+    const allowedFields = [
+      "nombre_usuario",
+      "telefono_usuario",
+      "fecha_nac_usuario",
+      "imagen_perfil"
+    ];
+    const updateData = Object.fromEntries(
+      allowedFields
+        .filter((field) => Object.hasOwn(req.body, field))
+        .map((field) => [field, req.body[field]])
+    );
     if (imagen_perfil === undefined || imagen_perfil === null) {
       delete updateData.imagen_perfil;
     }
@@ -114,7 +117,7 @@ export const actualizarUsuario = async (req, res) => {
     );
 
     if (!usuarioActualizado) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({
@@ -122,10 +125,7 @@ export const actualizarUsuario = async (req, res) => {
       data: usuarioActualizado
     });
   } catch (error) {
-    res.status(400).json({
-      message: "Error al actualizar usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al actualizar usuario");
   }
 };
 
@@ -134,39 +134,28 @@ export const eliminarUsuario = async (req, res) => {
   try {
     const usuarioEliminado = await Usuario.findByIdAndDelete(req.params.id);
     if (!usuarioEliminado) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
     res.status(200).json({ message: "Usuario eliminado correctamente" });
   } catch (error) {
-    res.status(500).json({
-      message: "Error al eliminar usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al eliminar usuario");
   }
 };
 
 export const seleccionarTituloActivo = async (req, res) => {
-  console.log('🔥 CONTROLADOR EJECUTADO'); // 👈 PRIMERO ESTO
-  console.log('📦 Body completo:', JSON.stringify(req.body)); 
   try {
-    console.log('📦 Body recibido:', req.body);
     const { usuarioId, logroId } = req.body;
-    console.log('Usuario ID:', usuarioId);
-    console.log('Logro ID:', logroId);
-   
 
     const usuario = await Usuario.findById(usuarioId);
     if (!usuario) {
-      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    // Buscar el logro en el array de logros del usuario
     const logro = usuario.logros.id(logroId);
     if (!logro) {
-      return res.status(404).json({ mensaje: "Logro no encontrado" });
+      return respondWithError(res, 404, "ACHIEVEMENT_NOT_FOUND", "Logro no encontrado");
     }
 
-    // Actualizar título activo
     usuario.titulo_activo = {
       id_logro: logro._id.toString(),
       nombre_logro: logro.nombre_logro,
@@ -180,8 +169,7 @@ export const seleccionarTituloActivo = async (req, res) => {
       titulo_activo: usuario.titulo_activo
     });
   } catch (error) {
-    console.error("Error al seleccionar título:", error);
-    res.status(500).json({ mensaje: "Error del servidor" });
+    return respondWithControllerError(res, error, "Error al seleccionar título");
   }
 };
 
@@ -197,13 +185,12 @@ export const quitarTituloActivo = async (req, res) => {
     );
 
     if (!usuario) {
-      return res.status(404).json({ mensaje: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({ mensaje: "Título removido correctamente" });
   } catch (error) {
-    console.error("Error al quitar título:", error);
-    res.status(500).json({ mensaje: "Error del servidor" });
+    return respondWithControllerError(res, error, "Error al quitar título");
   }
 };
 
@@ -211,18 +198,18 @@ export const quitarTituloActivo = async (req, res) => {
 export const seguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.usuario?._id || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
-      return res.status(400).json({ message: "Se requiere id_usuario del seguidor" });
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
     }
 
     if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
-      return res.status(400).json({ message: "ID de usuario inválido" });
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     if (targetId.toString() === followerId.toString()) {
-      return res.status(400).json({ message: "No puedes seguirte a ti mismo" });
+      return respondWithError(res, 400, "CANNOT_FOLLOW_SELF", "No puedes seguirte a ti mismo");
     }
 
     const [targetUser, followerUser] = await Promise.all([
@@ -231,7 +218,7 @@ export const seguirUsuario = async (req, res) => {
     ]);
 
     if (!targetUser || !followerUser) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     // Agregar de forma atómica evitando duplicados
@@ -250,11 +237,7 @@ export const seguirUsuario = async (req, res) => {
       total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
     });
   } catch (error) {
-    console.error("❌ Error al seguir usuario:", error);
-    res.status(500).json({
-      message: "Error al seguir usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al seguir usuario");
   }
 };
 
@@ -262,14 +245,14 @@ export const seguirUsuario = async (req, res) => {
 export const dejarDeSeguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.usuario?._id || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
-      return res.status(400).json({ message: "Se requiere id_usuario del seguidor" });
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
     }
 
     if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
-      return res.status(400).json({ message: "ID de usuario inválido" });
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     const [targetUser, followerUser] = await Promise.all([
@@ -278,7 +261,7 @@ export const dejarDeSeguirUsuario = async (req, res) => {
     ]);
 
     if (!targetUser || !followerUser) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     // Remover de forma atómica
@@ -297,11 +280,7 @@ export const dejarDeSeguirUsuario = async (req, res) => {
       total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
     });
   } catch (error) {
-    console.error("❌ Error al dejar de seguir usuario:", error);
-    res.status(500).json({
-      message: "Error al dejar de seguir usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al dejar de seguir usuario");
   }
 };
 
@@ -310,7 +289,7 @@ export const obtenerSeguidores = async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "ID de usuario inválido" });
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     const usuario = await Usuario.findById(id).populate(
@@ -319,7 +298,7 @@ export const obtenerSeguidores = async (req, res) => {
     );
 
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({
@@ -327,11 +306,7 @@ export const obtenerSeguidores = async (req, res) => {
       total: usuario.seguidores ? usuario.seguidores.length : 0
     });
   } catch (error) {
-    console.error("❌ Error al obtener seguidores:", error);
-    res.status(500).json({
-      message: "Error al obtener seguidores",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener seguidores");
   }
 };
 
@@ -340,7 +315,7 @@ export const obtenerSeguidos = async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "ID de usuario inválido" });
+      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     const usuario = await Usuario.findById(id).populate(
@@ -349,7 +324,7 @@ export const obtenerSeguidos = async (req, res) => {
     );
 
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({
@@ -357,10 +332,6 @@ export const obtenerSeguidos = async (req, res) => {
       total: usuario.seguidos ? usuario.seguidos.length : 0
     });
   } catch (error) {
-    console.error("❌ Error al obtener seguidos:", error);
-    res.status(500).json({
-      message: "Error al obtener seguidos",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener seguidos");
   }
-};
+};

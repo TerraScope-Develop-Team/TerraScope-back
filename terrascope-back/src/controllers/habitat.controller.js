@@ -1,4 +1,5 @@
 import Habitat from "../models/habitat.model.js";
+import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 // Autor: César González
 // Fecha: 2025-10-03
 // Descripción: Controladores para manejar las operaciones CRUD de hábitats
@@ -9,9 +10,7 @@ export const createHabitat = async (req, res) => {
     const { nombre_habitat, descripcion_habitat } = req.body;
     
     if (!nombre_habitat || !descripcion_habitat) {
-      return res.status(400).json({
-        message: "Nombre y descripción del hábitat son requeridos"
-      });
+      return respondWithError(res, 400, "HABITAT_FIELDS_REQUIRED", "Nombre y descripción del hábitat son requeridos");
     }
     
     const newHabitat = new Habitat({
@@ -25,14 +24,10 @@ export const createHabitat = async (req, res) => {
     
     res.status(201).json({
       message: "Hábitat creado exitosamente",
-      habitat: savedHabitat
+      data: savedHabitat
     });
   } catch (error) {
-    console.error("❌ Error creando hábitat:", error);
-    res.status(500).json({
-      message: "Error interno del servidor",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al crear el hábitat");
   }
 };
 
@@ -48,16 +43,12 @@ export const getAllHabitats = async (req, res) => {
       console.log('🔑 _id del primer hábitat:', habitats[0]._id);
     }
     
-    res.json({
+    res.status(200).json({
       message: "Hábitats obtenidos exitosamente",
-      habitats
+      data: habitats
     });
   } catch (error) {
-    console.error("❌ Error obteniendo hábitats:", error);
-    res.status(500).json({
-      message: "Error interno del servidor",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener los hábitats");
   }
 };
 
@@ -72,28 +63,17 @@ export const getHabitatById = async (req, res) => {
     
     if (!habitat) {
       console.log('⚠️ Hábitat no encontrado con ID:', id);
-      return res.status(404).json({
-        message: "Hábitat no encontrado"
-      });
+      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
     }
     
     console.log('✅ Hábitat encontrado:', habitat);
     
-    res.json({
+    res.status(200).json({
       message: "Hábitat obtenido exitosamente",
-      habitat
+      data: habitat
     });
   } catch (error) {
-    console.error("❌ Error obteniendo hábitat:", error);
-    if (error.kind === 'ObjectId') {
-      return res.status(400).json({
-        message: "ID de hábitat inválido"
-      });
-    }
-    res.status(500).json({
-      message: "Error interno del servidor",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener el hábitat");
   }
 };
 
@@ -114,28 +94,17 @@ export const updateHabitat = async (req, res) => {
     
     if (!updatedHabitat) {
       console.log('⚠️ Hábitat no encontrado para actualizar:', id);
-      return res.status(404).json({
-        message: "Hábitat no encontrado"
-      });
+      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
     }
     
     console.log('✅ Hábitat actualizado:', updatedHabitat);
     
-    res.json({
+    res.status(200).json({
       message: "Hábitat actualizado exitosamente",
-      habitat: updatedHabitat
+      data: updatedHabitat
     });
   } catch (error) {
-    console.error("❌ Error actualizando hábitat:", error);
-    if (error.kind === 'ObjectId') {
-      return res.status(400).json({
-        message: "ID de hábitat inválido"
-      });
-    }
-    res.status(500).json({
-      message: "Error interno del servidor",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al actualizar el hábitat");
   }
 };
 
@@ -150,27 +119,16 @@ export const deleteHabitat = async (req, res) => {
     
     if (!deletedHabitat) {
       console.log('⚠️ Hábitat no encontrado para eliminar:', id);
-      return res.status(404).json({
-        message: "Hábitat no encontrado"
-      });
+      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
     }
     
     console.log('✅ Hábitat eliminado:', deletedHabitat);
     
-    res.json({
+    res.status(200).json({
       message: "Hábitat eliminado exitosamente",
-      habitat: deletedHabitat
+      data: deletedHabitat
     });
   } catch (error) {
-    console.error("❌ Error eliminando hábitat:", error);
-    if (error.kind === 'ObjectId') {
-      return res.status(400).json({
-        message: "ID de hábitat inválido"
-      });
-    }
-    res.status(500).json({
-      message: "Error interno del servidor",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al eliminar el hábitat");
   }
 };

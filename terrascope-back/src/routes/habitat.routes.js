@@ -6,6 +6,7 @@ import {
   updateHabitat,
   deleteHabitat
 } from "../controllers/habitat.controller.js";
+import { authenticate, requireRoles } from "../middleware/auth.middleware.js";
 
 // Autor: César González
 // Fecha: 2025-10-03
@@ -14,7 +15,7 @@ import {
 const router = express.Router();
 
 // Crear un nuevo hábitat
-router.post("/", createHabitat);
+router.post("/", authenticate, requireRoles("Administrador"), createHabitat);
 
 // Obtener todos los hábitats
 router.get("/", getAllHabitats);
@@ -23,9 +24,9 @@ router.get("/", getAllHabitats);
 router.get("/:id", getHabitatById);
 
 // Actualizar un hábitat
-router.put("/:id", updateHabitat);
+router.put("/:id", authenticate, requireRoles("Administrador"), updateHabitat);
 
 // Eliminar un hábitat
-router.delete("/:id", deleteHabitat);
+router.delete("/:id", authenticate, requireRoles("Administrador"), deleteHabitat);
 
 export default router;

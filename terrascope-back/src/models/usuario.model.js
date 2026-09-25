@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const UsuarioSchema = new mongoose.Schema({
   nombre_usuario: {
@@ -14,7 +15,8 @@ const UsuarioSchema = new mongoose.Schema({
   },
   contrasenia_usuario: {
     type: String,
-    required: true
+    required: true,
+    select: false
   },
   telefono_usuario: {
     type: String,
@@ -101,6 +103,22 @@ UsuarioSchema.virtual("total_seguidores").get(function () {
 
 UsuarioSchema.virtual("total_seguidos").get(function () {
   return this.seguidos ? this.seguidos.length : 0;
+});
+
+UsuarioSchema.pre("save", async function (next) {
+  if (!this.isModified("contrasenia_usuario")) {
+    return next();
+  }
+
+  this.contrasenia_usuario = await bcrypt.hash(this.contrasenia_usuario, 12);
+  next();
+});
+
+UsuarioSchema.set("toJSON", {
+  transform: (_doc, ret) => {
+    delete ret.contrasenia_usuario;
+    return ret;
+  }
 });
 
 export default mongoose.model("Usuario", UsuarioSchema);
