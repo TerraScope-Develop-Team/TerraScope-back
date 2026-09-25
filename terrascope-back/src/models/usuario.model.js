@@ -79,10 +79,28 @@ const UsuarioSchema = new mongoose.Schema({
   retos_activos: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: "Reto"
+  }],
+  seguidores: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Usuario"
+  }],
+  seguidos: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Usuario"
   }]
 }, {
   collection: "usuarios",
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+UsuarioSchema.virtual("total_seguidores").get(function () {
+  return this.seguidores ? this.seguidores.length : 0;
+});
+
+UsuarioSchema.virtual("total_seguidos").get(function () {
+  return this.seguidos ? this.seguidos.length : 0;
 });
 
 export default mongoose.model("Usuario", UsuarioSchema);

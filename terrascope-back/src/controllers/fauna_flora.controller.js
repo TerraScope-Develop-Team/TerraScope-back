@@ -1,5 +1,6 @@
 import FaunaFlora from "../models/fauna_flora.model.js";
 import Habitat from "../models/habitat.model.js";
+import Usuario from "../models/usuario.model.js";
 import mongoose from "mongoose";
 import retosService from "../services/retos.service.js";
 
@@ -132,17 +133,31 @@ try {
   }
 };
 
-// Obtener todos con filtros opcionales
+// Obtener todos con filtros opcionales (enriquecidos con métricas sociales)
 export const getAvistamientos = async (req, res) => {
   try {
-    const { especie, categoria } = req.query;
+    const { especie, categoria, usuarioId, id_usuario } = req.query;
+    const currentUserId = req.usuario?._id || usuarioId || id_usuario;
     let filter = {};
     if (especie) filter.especie = especie;
     if (categoria) {
-      filter.especie = categoria; // Adjust as needed
+      filter.especie = categoria;
     }
-    const avistamientos = await FaunaFlora.find(filter);
-    res.status(200).json(avistamientos);
+    const avistamientos = await FaunaFlora.find(filter)
+      .sort({ createdAt: -1 })
+      .populate("id_usuario", "nombre_usuario imagen_perfil");
+
+    const formatted = avistamientos.map((item) => {
+      const obj = item.toObject();
+      obj.total_likes = item.likes ? item.likes.length : 0;
+      obj.total_comentarios = item.comentarios ? item.comentarios.length : 0;
+      obj.user_has_liked = currentUserId && item.likes
+        ? item.likes.some((l) => l.toString() === currentUserId.toString())
+        : false;
+      return obj;
+    });
+
+    res.status(200).json(formatted);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
     res.status(500).json({ 
@@ -152,14 +167,28 @@ export const getAvistamientos = async (req, res) => {
   }
 };
 
-// Obtener por ID
+// Obtener por ID (enriquecido con métricas sociales)
 export const getAvistamientoById = async (req, res) => {
   try {
-    const avistamiento = await FaunaFlora.findById(req.params.id);
+    const { usuarioId, id_usuario } = req.query;
+    const currentUserId = req.usuario?._id || usuarioId || id_usuario;
+
+    const avistamiento = await FaunaFlora.findById(req.params.id)
+      .populate("id_usuario", "nombre_usuario imagen_perfil")
+      .populate("comentarios.id_usuario", "nombre_usuario imagen_perfil");
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
-    res.status(200).json(avistamiento);
+
+    const obj = avistamiento.toObject();
+    obj.total_likes = avistamiento.likes ? avistamiento.likes.length : 0;
+    obj.total_comentarios = avistamiento.comentarios ? avistamiento.comentarios.length : 0;
+    obj.user_has_liked = currentUserId && avistamiento.likes
+      ? avistamiento.likes.some((l) => l.toString() === currentUserId.toString())
+      : false;
+
+    res.status(200).json(obj);
   } catch (error) {
     console.error('❌ Error al obtener avistamiento:', error);
     res.status(500).json({ 
@@ -169,39 +198,172 @@ export const getAvistamientoById = async (req, res) => {
   }
 };
 
-// Agregar comentario 
-export const addComentario = async (req, res) => {
+// Feed consolidado: Avistamientos de los usuarios a los que sigo
+export const getFeedAvistamientos = async (req, res) => {
   try {
-    const { id_usuario, nombre_usuario, comentario } = req.body;
-    
-    if (!nombre_usuario || !comentario) {
+    const currentUserId = req.usuario?._id || req.query.usuarioId || req.query.id_usuario;
+
+    if (!currentUserId) {
       return res.status(400).json({ 
-        message: "nombre_usuario y comentario son requeridos" 
+        message: "Se requiere usuarioId o id_usuario para obtener el feed personalizado" 
       });
     }
 
-    const avistamiento = await FaunaFlora.findById(req.params.id);
-    
+    if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
+      return res.status(400).json({ message: "ID de usuario inválido" });
+    }
+
+    const usuario = await Usuario.findById(currentUserId);
+    if (!usuario) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    // Si no sigue a nadie, devolver feed vacío amigable
+    if (!usuario.seguidos || usuario.seguidos.length === 0) {
+      return res.status(200).json({
+        message: "Aún no sigues a ningún usuario. Sigue a otros exploradores para ver sus avistamientos aquí.",
+        feed: [],
+        total: 0
+      });
+    }
+
+    // Buscar avistamientos creados por usuarios que sigo
+    const avistamientos = await FaunaFlora.find({
+      id_usuario: { $in: usuario.seguidos }
+    })
+      .sort({ createdAt: -1 })
+      .populate("id_usuario", "nombre_usuario imagen_perfil");
+
+    const feed = avistamientos.map((item) => {
+      const obj = item.toObject();
+      obj.total_likes = item.likes ? item.likes.length : 0;
+      obj.total_comentarios = item.comentarios ? item.comentarios.length : 0;
+      obj.user_has_liked = item.likes
+        ? item.likes.some((l) => l.toString() === currentUserId.toString())
+        : false;
+      return obj;
+    });
+
+    res.status(200).json({
+      message: "Feed obtenido exitosamente",
+      feed,
+      total: feed.length
+    });
+  } catch (error) {
+    console.error("❌ Error al obtener feed de avistamientos:", error);
+    res.status(500).json({
+      message: "Error al obtener el feed",
+      error: error.message
+    });
+  }
+};
+
+// Alternar "like" en un avistamiento (dar y quitar sin duplicar)
+export const toggleLikeAvistamiento = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.usuario?._id || req.body.id_usuario || req.body.usuarioId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "Se requiere id_usuario para dar o quitar like" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "ID de usuario inválido" });
+    }
+
+    const avistamiento = await FaunaFlora.findById(id);
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    const nuevoComentario = {
-      nombre_usuario, 
-      comentario, 
-      fecha: new Date()
-    };
+    if (!avistamiento.likes) {
+      avistamiento.likes = [];
+    }
 
-    if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
-      if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
-        nuevoComentario.id_usuario = id_usuario;
+    const yaDioLike = avistamiento.likes.some(
+      (likeId) => likeId.toString() === userId.toString()
+    );
+
+    if (yaDioLike) {
+      // Quitar like
+      avistamiento.likes = avistamiento.likes.filter(
+        (likeId) => likeId.toString() !== userId.toString()
+      );
+    } else {
+      // Agregar like (garantizado único)
+      avistamiento.likes.push(userId);
+    }
+
+    await avistamiento.save();
+
+    res.status(200).json({
+      message: yaDioLike ? "Like removido" : "Like agregado exitosamente",
+      liked: !yaDioLike,
+      total_likes: avistamiento.likes.length,
+      avistamientoId: avistamiento._id
+    });
+  } catch (error) {
+    console.error("❌ Error al alternar like:", error);
+    res.status(500).json({
+      message: "Error al procesar el like",
+      error: error.message
+    });
+  }
+};
+
+// Agregar comentario (asociado a avistamiento y autor con fecha/hora)
+export const addComentario = async (req, res) => {
+  try {
+    const { id_usuario, nombre_usuario, comentario, imagen_perfil } = req.body;
+    const finalUserId = req.usuario?._id || id_usuario;
+    
+    if (!comentario || comentario.trim() === "") {
+      return res.status(400).json({ 
+        message: "El comentario no puede estar vacío" 
+      });
+    }
+
+    const avistamiento = await FaunaFlora.findById(req.params.id);
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    let autorNombre = nombre_usuario;
+    let autorAvatar = imagen_perfil || "";
+
+    // Si viene id de usuario válido, sincronizar información más reciente del autor
+    if (finalUserId && mongoose.Types.ObjectId.isValid(finalUserId)) {
+      const usuarioEncontrado = req.usuario || await Usuario.findById(finalUserId);
+      if (usuarioEncontrado) {
+        autorNombre = usuarioEncontrado.nombre_usuario || autorNombre;
+        autorAvatar = usuarioEncontrado.imagen_perfil || autorAvatar;
       }
     }
+
+    if (!autorNombre) {
+      return res.status(400).json({ message: "Se requiere nombre_usuario o un usuario autenticado" });
+    }
+
+    const nuevoComentario = {
+      id_usuario: finalUserId && mongoose.Types.ObjectId.isValid(finalUserId) ? finalUserId : undefined,
+      nombre_usuario: autorNombre,
+      imagen_perfil: autorAvatar,
+      comentario: comentario.trim(),
+      fecha: new Date()
+    };
 
     avistamiento.comentarios.push(nuevoComentario);
     await avistamiento.save();
     
-    res.status(200).json(avistamiento);
+    const comentarioCreado = avistamiento.comentarios[avistamiento.comentarios.length - 1];
+
+    res.status(201).json({
+      message: "Comentario agregado exitosamente",
+      comentario: comentarioCreado,
+      total_comentarios: avistamiento.comentarios.length,
+      avistamientoId: avistamiento._id
+    });
   } catch (error) {
     console.error("❌ Error al agregar comentario:", error);
     res.status(500).json({ 
@@ -210,6 +372,68 @@ export const addComentario = async (req, res) => {
     });
   }
 };
+
+// Eliminar comentario con moderación (Autor o Administrador)
+export const deleteComentario = async (req, res) => {
+  try {
+    const { id, comentarioId } = req.params;
+    const solicitanteId = req.usuario?._id || req.body.id_usuario || req.query.id_usuario;
+
+    if (!solicitanteId) {
+      return res.status(401).json({
+        message: "Se requiere identificación de usuario (id_usuario) para eliminar un comentario"
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(comentarioId)) {
+      return res.status(400).json({ message: "ID de avistamiento o comentario inválido" });
+    }
+
+    const avistamiento = await FaunaFlora.findById(id);
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    const comentario = avistamiento.comentarios.id(comentarioId);
+    if (!comentario) {
+      return res.status(404).json({ message: "Comentario no encontrado" });
+    }
+
+    // Comprobación de permisos de moderación
+    const esAutor = comentario.id_usuario && comentario.id_usuario.toString() === solicitanteId.toString();
+
+    let esAdmin = false;
+    if (!esAutor) {
+      const usuario = req.usuario || await Usuario.findById(solicitanteId);
+      esAdmin = usuario?.rol?.nombre_rol === "Administrador";
+    }
+
+    if (!esAutor && !esAdmin) {
+      return res.status(403).json({
+        message: "No tienes permisos para eliminar este comentario. Solo el autor del comentario o un Administrador pueden eliminarlo."
+      });
+    }
+
+    avistamiento.comentarios.pull({ _id: comentarioId });
+    await avistamiento.save();
+
+    res.status(200).json({
+      message: esAdmin && !esAutor
+        ? "Comentario eliminado por un Administrador (moderación)"
+        : "Comentario eliminado exitosamente",
+      comentarioId,
+      total_comentarios: avistamiento.comentarios.length,
+      avistamientoId: avistamiento._id
+    });
+  } catch (error) {
+    console.error("❌ Error al eliminar comentario:", error);
+    res.status(500).json({
+      message: "Error al eliminar comentario",
+      error: error.message
+    });
+  }
+};
+
 
 export const deleteAvistamiento = async (req, res) => {
   try {
