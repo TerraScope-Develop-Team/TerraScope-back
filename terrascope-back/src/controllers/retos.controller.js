@@ -1,6 +1,7 @@
 import Reto from "../models/reto.model.js";
 import Usuario from "../models/usuario.model.js";
 import retosService from "../services/retos.service.js";
+import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 export const obtenerRetosActivos = async (req, res) => {
   try {
@@ -10,10 +11,7 @@ export const obtenerRetosActivos = async (req, res) => {
     res.status(200).json(retos);
   } catch (error) {
     console.error("❌ Error obteniendo retos:", error);
-    res.status(500).json({
-      message: "Error al obtener retos activos",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener retos activos");
   }
 };
 
@@ -21,17 +19,14 @@ export const obtenerRetoById = async (req, res) => {
   try {
     const reto = await Reto.findById(req.params.id);
     
-    if (!reto) {
-      return res.status(404).json({ message: "Reto no encontrado" });
+      if (!reto) {
+        return respondWithError(res, 404, "CHALLENGE_NOT_FOUND", "Reto no encontrado");
     }
     
     res.status(200).json(reto);
   } catch (error) {
     console.error("❌ Error obteniendo reto:", error);
-    res.status(500).json({
-      message: "Error al obtener reto",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener reto");
   }
 };
 
@@ -39,24 +34,24 @@ export const inscribirseReto = async (req, res) => {
   try {
     const { retoId, usuarioId } = req.body;
     
-    if (!usuarioId) {
-      return res.status(400).json({ message: "Se requiere el ID del usuario" });
+      if (!usuarioId) {
+        return respondWithError(res, 400, "USER_ID_REQUIRED", "Se requiere el ID del usuario");
     }
 
     const reto = await Reto.findById(retoId);
     const usuario = await Usuario.findById(usuarioId);
 
-    if (!reto || !usuario) {
-      return res.status(404).json({ message: "Reto o usuario no encontrado" });
+      if (!reto || !usuario) {
+        return respondWithError(res, 404, "CHALLENGE_OR_USER_NOT_FOUND", "Reto o usuario no encontrado");
     }
 
-    if (reto.estado !== "activo") {
-      return res.status(400).json({ message: "Este reto no está activo" });
+      if (reto.estado !== "activo") {
+        return respondWithError(res, 409, "CHALLENGE_NOT_ACTIVE", "Este reto no está activo");
     }
 
-    const yaInscrito = reto.usuarios_inscritos.includes(usuarioId);
-    if (yaInscrito) {
-      return res.status(400).json({ message: "Ya estás inscrito en este reto" });
+      const yaInscrito = reto.usuarios_inscritos.includes(usuarioId);
+      if (yaInscrito) {
+        return respondWithError(res, 409, "ALREADY_ENROLLED", "Ya estás inscrito en este reto");
     }
 
     reto.usuarios_inscritos.push(usuarioId);
@@ -71,10 +66,7 @@ export const inscribirseReto = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error inscribiendo en reto:", error);
-    res.status(500).json({
-      message: "Error al inscribirse en el reto",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al inscribirse en el reto");
   }
 };
 
@@ -86,7 +78,7 @@ export const desinscribirseReto = async (req, res) => {
     const usuario = await Usuario.findById(usuarioId);
 
     if (!reto || !usuario) {
-      return res.status(404).json({ message: "Reto o usuario no encontrado" });
+      return respondWithError(res, 404, "CHALLENGE_OR_USER_NOT_FOUND", "Reto o usuario no encontrado");
     }
 
     reto.usuarios_inscritos = reto.usuarios_inscritos.filter(
@@ -104,10 +96,7 @@ export const desinscribirseReto = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error desinscribiendo del reto:", error);
-    res.status(500).json({
-      message: "Error al desinscribirse del reto",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al desinscribirse del reto");
   }
 };
 
@@ -118,8 +107,8 @@ export const obtenerTablaPosiciones = async (req, res) => {
     const reto = await Reto.findById(retoId)
       .populate('usuarios_finalizados.usuario_id', 'nombre_usuario imagen_perfil');
 
-    if (!reto) {
-      return res.status(404).json({ message: "Reto no encontrado" });
+      if (!reto) {
+        return respondWithError(res, 404, "CHALLENGE_NOT_FOUND", "Reto no encontrado");
     }
 
     const top3 = reto.usuarios_finalizados
@@ -137,10 +126,7 @@ export const obtenerTablaPosiciones = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error obteniendo tabla de posiciones:", error);
-    res.status(500).json({
-      message: "Error al obtener tabla de posiciones",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener tabla de posiciones");
   }
 };
 
@@ -152,7 +138,7 @@ export const obtenerLogrosUsuario = async (req, res) => {
       .populate('logros.id_reto_base', 'nombre_reto descripcion_reto');
 
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     res.status(200).json({
@@ -161,10 +147,7 @@ export const obtenerLogrosUsuario = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error obteniendo logros:", error);
-    res.status(500).json({
-      message: "Error al obtener logros del usuario",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener logros del usuario");
   }
 };
 
@@ -174,12 +157,12 @@ export const toggleMostrarLogro = async (req, res) => {
 
     const usuario = await Usuario.findById(usuarioId);
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
     const logro = usuario.logros.id(logroId);
     if (!logro) {
-      return res.status(404).json({ message: "Logro no encontrado" });
+      return respondWithError(res, 404, "ACHIEVEMENT_NOT_FOUND", "Logro no encontrado");
     }
 
     logro.es_mostrado = !logro.es_mostrado;
@@ -191,10 +174,7 @@ export const toggleMostrarLogro = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error actualizando visibilidad:", error);
-    res.status(500).json({
-      message: "Error al actualizar visibilidad del logro",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al actualizar visibilidad del logro");
   }
 };
 
@@ -206,7 +186,7 @@ export const obtenerProgresoReto = async (req, res) => {
     const reto = await Reto.findById(retoId);
 
     if (!usuario || !reto) {
-      return res.status(404).json({ message: "Usuario o reto no encontrado" });
+      return respondWithError(res, 404, "CHALLENGE_OR_USER_NOT_FOUND", "Usuario o reto no encontrado");
     }
 
     const progreso = {};
@@ -232,10 +212,7 @@ export const obtenerProgresoReto = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error obteniendo progreso:", error);
-    res.status(500).json({
-      message: "Error al obtener progreso del reto",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al obtener progreso del reto");
   }
 };
 
@@ -268,9 +245,6 @@ export const crearRetoManual = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error creando reto:", error);
-    res.status(500).json({
-      message: "Error al crear reto",
-      error: error.message
-    });
+    return respondWithControllerError(res, error, "Error al crear reto");
   }
 };

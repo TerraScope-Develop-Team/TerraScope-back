@@ -2,13 +2,11 @@ import FaunaFlora from "../models/fauna_flora.model.js";
 import Habitat from "../models/habitat.model.js";
 import mongoose from "mongoose";
 import retosService from "../services/retos.service.js";
+import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 // Crear avistamiento
 export const createAvistamiento = async (req, res) => {
   try {
-    console.log('📥 Datos recibidos en createAvistamiento:');
-    console.log(JSON.stringify(req.body, null, 2));
-
     const {
       nombre_comun,
       nombre_cientifico,
@@ -21,17 +19,12 @@ export const createAvistamiento = async (req, res) => {
       estado_especimen,
       habitat,  // ← CORREGIDO: era "habitad"
       tipo,     // ← AGREGADO: faltaba extraer
-      nombre_usuario,  // ← AGREGADO: faltaba extraer
-      id_usuario,  // ← AGREGADO: faltaba extraer
-      validacion  // ← AGREGADO: faltaba extraer (opcional)
     } = req.body;
 
     // Validar que habitat existe y tiene id_habitat
     if (!habitat || !habitat.id_habitat) {
       console.log('❌ Habitat no proporcionado o sin ID');
-      return res.status(400).json({ 
-        message: "Habitat es requerido y debe tener un id_habitat" 
-      });
+      return respondWithError(res, 400, "HABITAT_ID_REQUIRED", "El hábitat es requerido y debe tener un id_habitat");
     }
 
     console.log('🔍 Validando habitat con ID:', habitat.id_habitat);
@@ -39,9 +32,7 @@ export const createAvistamiento = async (req, res) => {
     // Validar que el ID es un ObjectId válido
     if (!mongoose.Types.ObjectId.isValid(habitat.id_habitat)) {
       console.log('❌ ID de habitat NO es válido');
-      return res.status(400).json({ 
-        message: "ID de habitat inválido" 
-      });
+      return respondWithError(res, 400, "INVALID_HABITAT_ID", "El ID del hábitat no tiene un formato válido");
     }
 
     // Buscar el habitat en la base de datos
@@ -49,9 +40,7 @@ export const createAvistamiento = async (req, res) => {
     
     if (!habitatExiste) {
       console.log('❌ Habitat no encontrado en la base de datos');
-      return res.status(404).json({ 
-        message: "Habitat no encontrado" 
-      });
+      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
     }
 
     console.log('✅ Habitat encontrado:', habitatExiste.nombre_habitat);
@@ -77,9 +66,9 @@ export const createAvistamiento = async (req, res) => {
       estado_especimen,
       habitat: habitatData,  // ← CORREGIDO: era "habitad"
       tipo,
-      nombre_usuario,
-      id_usuario,
-      validacion: validacion || {  // ← Usar valores por defecto si no viene
+      nombre_usuario: req.user.nombre_usuario,
+      id_usuario: req.user._id,
+      validacion: {
         estado: "pendiente",
         votos_comunidad: 0,
         requeridos_comunidad: 5,
@@ -88,11 +77,8 @@ export const createAvistamiento = async (req, res) => {
       }
     });
 
-    console.log('💾 Guardando en base de datos...');
     await nuevoAvistamiento.save();
-    
-    console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento._id);
-    // Al final de createAvistamiento, antes del res.status(201).json
+
 try {
   if (nuevoAvistamiento.id_usuario) {
     await retosService.actualizarHistorial(
@@ -113,22 +99,14 @@ try {
 
   } catch (error) {
     console.error('❌ Error completo:', error);
-    console.error('❌ Error name:', error.name);
-    console.error('❌ Error message:', error.message);
     
     // Manejar errores de validación de Mongoose
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({ 
-        message: "Error de validación",
-        detalles: messages
-      });
+      return respondWithError(res, 400, "SIGHTING_VALIDATION_ERROR", "Los datos del avistamiento no son válidos", messages);
     }
 
-    res.status(500).json({ 
-      message: "Error al crear un avistamiento", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al crear un avistamiento");
   }
 };
 
@@ -145,10 +123,7 @@ export const getAvistamientos = async (req, res) => {
     res.status(200).json(avistamientos);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
-    res.status(500).json({ 
-      message: "Error al conseguir los avistamientos", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al conseguir los avistamientos");
   }
 };
 
@@ -157,46 +132,124 @@ export const getAvistamientoById = async (req, res) => {
   try {
     const avistamiento = await FaunaFlora.findById(req.params.id);
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
     res.status(200).json(avistamiento);
   } catch (error) {
     console.error('❌ Error al obtener avistamiento:', error);
-    res.status(500).json({ 
-      message: "Error al obtener el avistamiento", 
-      error: error.message 
+    return respondWithControllerError(res, error, "Error al obtener el avistamiento");
+  }
+};
+
+export const getAvistamientosCercanos = async (req, res) => {
+  try {
+    const latitud = Number(req.params.latitud);
+    const longitud = Number(req.params.longitud);
+    const distanciaKm = Number(req.params.distanciaKm);
+
+    if (
+      !Number.isFinite(latitud) || latitud < -90 || latitud > 90 ||
+      !Number.isFinite(longitud) || longitud < -180 || longitud > 180 ||
+      !Number.isFinite(distanciaKm) || distanciaKm <= 0
+    ) {
+      return respondWithError(res, 400, "INVALID_LOCATION_RANGE", "Coordenadas o distancia inválidas");
+    }
+
+    const latitudDelta = distanciaKm / 110.574;
+    const longitudScale = Math.cos((latitud * Math.PI) / 180);
+    const longitudDelta = longitudScale === 0
+      ? 180
+      : Math.min(180, distanciaKm / (111.320 * Math.abs(longitudScale)));
+
+    const candidatos = await FaunaFlora.find({
+      "ubicacion.latitud": { $gte: latitud - latitudDelta, $lte: latitud + latitudDelta },
+      "ubicacion.longitud": { $gte: longitud - longitudDelta, $lte: longitud + longitudDelta }
     });
+
+    const rad = Math.PI / 180;
+    const cercanos = candidatos.filter((avistamiento) => {
+      const deltaLat = (avistamiento.ubicacion.latitud - latitud) * rad;
+      const deltaLon = (avistamiento.ubicacion.longitud - longitud) * rad;
+      const haversine = Math.sin(deltaLat / 2) ** 2 +
+        Math.cos(latitud * rad) *
+        Math.cos(avistamiento.ubicacion.latitud * rad) *
+        Math.sin(deltaLon / 2) ** 2;
+      const distancia = 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+      return distancia <= distanciaKm;
+    });
+
+    return res.status(200).json({ data: cercanos });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al buscar avistamientos cercanos");
+  }
+};
+
+export const getAvistamientosPorEspecie = async (req, res) => {
+  try {
+    const avistamientos = await FaunaFlora.find({ especie: req.params.especie });
+    return res.status(200).json({ data: avistamientos });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al buscar avistamientos por especie");
+  }
+};
+
+export const getAvistamientosPorUsuario = async (req, res) => {
+  try {
+    const avistamientos = await FaunaFlora.find({ nombre_usuario: req.params.nombreUsuario });
+    return res.status(200).json({ data: avistamientos });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al buscar avistamientos por usuario");
+  }
+};
+
+export const updateAvistamiento = async (req, res) => {
+  try {
+    const avistamiento = await FaunaFlora.findById(req.params.id);
+    if (!avistamiento) {
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
+    }
+
+    const isAdmin = req.user.rol?.nombre_rol === "Administrador";
+    if (!isAdmin && avistamiento.id_usuario?.toString() !== req.user._id.toString()) {
+      return respondWithError(res, 403, "SIGHTING_UPDATE_FORBIDDEN", "No tienes permisos para este avistamiento");
+    }
+
+    const allowedFields = [
+      "nombre_comun", "nombre_cientifico", "especie", "descripcion", "imagen",
+      "ubicacion", "comportamiento", "estado_extincion", "estado_especimen", "tipo", "habitat"
+    ];
+    for (const field of allowedFields) {
+      if (Object.hasOwn(req.body, field)) avistamiento[field] = req.body[field];
+    }
+
+    await avistamiento.save();
+    return res.status(200).json({ data: avistamiento });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al actualizar el avistamiento");
   }
 };
 
 // Agregar comentario 
 export const addComentario = async (req, res) => {
   try {
-    const { id_usuario, nombre_usuario, comentario } = req.body;
+    const { comentario } = req.body;
     
-    if (!nombre_usuario || !comentario) {
-      return res.status(400).json({ 
-        message: "nombre_usuario y comentario son requeridos" 
-      });
+    if (!comentario) {
+      return respondWithError(res, 400, "COMMENT_FIELDS_REQUIRED", "El comentario es requerido");
     }
 
     const avistamiento = await FaunaFlora.findById(req.params.id);
     
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
 
     const nuevoComentario = {
-      nombre_usuario, 
+      nombre_usuario: req.user.nombre_usuario,
       comentario, 
-      fecha: new Date()
+      fecha: new Date(),
+      id_usuario: req.user._id
     };
-
-    if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
-      if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
-        nuevoComentario.id_usuario = id_usuario;
-      }
-    }
 
     avistamiento.comentarios.push(nuevoComentario);
     await avistamiento.save();
@@ -204,26 +257,27 @@ export const addComentario = async (req, res) => {
     res.status(200).json(avistamiento);
   } catch (error) {
     console.error("❌ Error al agregar comentario:", error);
-    res.status(500).json({ 
-      message: "Error al agregar comentario", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al agregar comentario");
   }
 };
 
 export const deleteAvistamiento = async (req, res) => {
   try {
-    const avistamiento = await FaunaFlora.findByIdAndDelete(req.params.id);
+    const avistamiento = await FaunaFlora.findById(req.params.id);
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
+
+    const isAdmin = req.user.rol?.nombre_rol === "Administrador";
+    if (!isAdmin && avistamiento.id_usuario?.toString() !== req.user._id.toString()) {
+      return respondWithError(res, 403, "SIGHTING_DELETE_FORBIDDEN", "No tienes permisos para este avistamiento");
+    }
+
+    await avistamiento.deleteOne();
     res.status(200).json({ message: "Avistamiento eliminado correctamente" });
   } catch (error) {
     console.error('❌ Error al eliminar avistamiento:', error);
-    res.status(500).json({ 
-      message: "Error al eliminar avistamiento", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al eliminar avistamiento");
   }
 };
 
@@ -252,10 +306,7 @@ export const getFrequentZones = async (req, res) => {
     res.status(200).json(frequentZones);
   } catch (error) {
     console.error('❌ Error al obtener zonas frecuentes:', error);
-    res.status(500).json({ 
-      message: "Error al obtener zonas frecuentes", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al obtener zonas frecuentes");
   }
 };
 
@@ -263,23 +314,19 @@ export const getFrequentZones = async (req, res) => {
 export const votarValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const { id_usuario } = req.body;
-
-    if (!id_usuario) {
-      return res.status(400).json({ message: "Se requiere el id_usuario" });
-    }
+    const id_usuario = req.user._id.toString();
 
     const avistamiento = await FaunaFlora.findById(avistamientoId);
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
 
     if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario) {
-      return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
+      return respondWithError(res, 403, "SELF_VOTE_FORBIDDEN", "No puedes votar tu propio avistamiento");
     }
 
     if (avistamiento.validacion.usuarios_validadores.includes(id_usuario)) {
-      return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
+      return respondWithError(res, 409, "ALREADY_VOTED", "Este usuario ya validó este avistamiento");
     }
 
     avistamiento.validacion.usuarios_validadores.push(id_usuario);
@@ -299,10 +346,7 @@ export const votarValidacion = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error al registrar voto:', error);
-    res.status(500).json({ 
-      message: "Error al registrar el voto", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al registrar el voto");
   }
 };
 
@@ -310,19 +354,10 @@ export const votarValidacion = async (req, res) => {
 export const validarPorExperto = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const { id_usuario, rol } = req.body;
-
-    if (!id_usuario || !rol) {
-      return res.status(400).json({ message: "Se requiere id_usuario y rol" });
-    }
-
-    if (!["Investigador", "Administrador"].includes(rol)) {
-      return res.status(403).json({ message: "Usuario no autorizado para validar como experto" });
-    }
 
     const avistamiento = await FaunaFlora.findById(avistamientoId);
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
 
     avistamiento.validacion.validado_por_experto = true;
@@ -337,23 +372,18 @@ export const validarPorExperto = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error al validar por experto:', error);
-    res.status(500).json({ 
-      message: "Error al validar por experto", 
-      error: error.message 
-    });
+    return respondWithControllerError(res, error, "Error al validar por experto");
   }
 };
 
 export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const userId = req.query.userId; // o req.body.userId
-
-    if (!userId) return res.status(400).json({ message: 'Falta el userId' });
+    const userId = req.user._id.toString();
 
     const avistamiento = await FaunaFlora.findById(avistamientoId);
     if (!avistamiento) {
-      return res.status(404).json({ message: "Avistamiento no encontrado" });
+      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
     }
 
     const validacion = avistamiento.validacion;
@@ -369,7 +399,7 @@ export const obtenerEstadoValidacion = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error:', error);
-    res.status(500).json({ message: "Error al obtener estado", error: error.message });
+    return respondWithControllerError(res, error, "Error al obtener estado");
   }
 };
 
