@@ -110,19 +110,36 @@ export const createAvistamiento = async (req, res) => {
   }
 };
 
-// Obtener todos con filtros opcionales
+// Obtener todos con filtros opcionales (enriquecidos con métricas sociales)
 export const getAvistamientos = async (req, res) => {
   try {
-    const { especie, categoria } = req.query;
+    const { especie, categoria, usuarioId, id_usuario } = req.query;
+    const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
+    
     let filter = {};
     if (especie) filter.especie = especie;
-    if (categoria) {
-      filter.especie = categoria; 
-    }
+    if (categoria) filter.especie = categoria; 
+
     const avistamientos = await prisma.faunaFlora.findMany({
-      where: filter
+      where: filter,
+      orderBy: { id: 'desc' },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
     });
-    res.status(200).json(avistamientos);
+
+    const formatted = avistamientos.map(item => {
+      return {
+        ...item,
+        total_likes: item.likes ? item.likes.length : 0,
+        total_comentarios: item.comentarios ? item.comentarios.length : 0,
+        user_has_liked: currentUserId && item.likes ? item.likes.includes(currentUserId) : false
+      };
+    });
+
+    res.status(200).json(formatted);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
     res.status(500).json({ 
@@ -132,16 +149,31 @@ export const getAvistamientos = async (req, res) => {
   }
 };
 
-// Obtener por ID
+// Obtener por ID (enriquecido con métricas sociales)
 export const getAvistamientoById = async (req, res) => {
   try {
+    const { usuarioId, id_usuario } = req.query;
+    const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
+
     const avistamiento = await prisma.faunaFlora.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
     });
+    
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
-    res.status(200).json(avistamiento);
+
+    res.status(200).json({
+      ...avistamiento,
+      total_likes: avistamiento.likes ? avistamiento.likes.length : 0,
+      total_comentarios: avistamiento.comentarios ? avistamiento.comentarios.length : 0,
+      user_has_liked: currentUserId && avistamiento.likes ? avistamiento.likes.includes(currentUserId) : false
+    });
   } catch (error) {
     console.error('❌ Error al obtener avistamiento:', error);
     res.status(500).json({ 
@@ -151,15 +183,13 @@ export const getAvistamientoById = async (req, res) => {
   }
 };
 
-// Agregar comentario 
+// Agregar comentario (asociado a avistamiento y autor con fecha/hora)
 export const addComentario = async (req, res) => {
   try {
-    const { id_usuario, nombre_usuario, comentario } = req.body;
+    const { comentario } = req.body;
     
-    if (!nombre_usuario || !comentario) {
-      return res.status(400).json({ 
-        message: "nombre_usuario y comentario son requeridos" 
-      });
+    if (!comentario || comentario.trim() === "") {
+      return res.status(400).json({ message: "El comentario es requerido" });
     }
 
     const avistamiento = await prisma.faunaFlora.findUnique({
@@ -170,18 +200,27 @@ export const addComentario = async (req, res) => {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
+    const autorId = req.usuario?.id || req.body.id_usuario;
+    const autorNombre = req.usuario?.nombre_usuario || req.body.nombre_usuario;
+    const autorAvatar = req.usuario?.imagen_perfil || req.body.imagen_perfil || "";
+
+    if (!autorNombre) {
+      return res.status(400).json({ message: "Se requiere usuario autenticado o nombre_usuario" });
+    }
+
     let validIdUsuario = null;
-    if (id_usuario && id_usuario !== 'null' && id_usuario !== '000000000000000000000000') {
-      if (/^[0-9a-fA-F]{24}$/.test(id_usuario)) {
-        validIdUsuario = id_usuario;
+    if (autorId && autorId !== 'null' && autorId !== '000000000000000000000000') {
+      if (/^[0-9a-fA-F]{24}$/.test(autorId)) {
+        validIdUsuario = autorId;
       }
     }
 
     const nuevoComentario = {
-      nombre_usuario, 
-      comentario, 
-      fecha: new Date(),
-      id_usuario: validIdUsuario
+      id_usuario: validIdUsuario,
+      nombre_usuario: autorNombre,
+      imagen_perfil: autorAvatar,
+      comentario: comentario.trim(),
+      fecha: new Date()
     };
 
     const updatedAvistamiento = await prisma.faunaFlora.update({
@@ -193,7 +232,15 @@ export const addComentario = async (req, res) => {
       }
     });
     
-    res.status(200).json(updatedAvistamiento);
+    const comentarioCreado = updatedAvistamiento.comentarios[updatedAvistamiento.comentarios.length - 1];
+    
+    res.status(201).json({
+      message: "Comentario agregado exitosamente",
+      comentario: comentarioCreado,
+      total_comentarios: updatedAvistamiento.comentarios.length,
+      avistamientoId: updatedAvistamiento.id,
+      data: updatedAvistamiento
+    });
   } catch (error) {
     console.error("❌ Error al agregar comentario:", error);
     res.status(500).json({ 
@@ -367,7 +414,8 @@ export const validarPorExperto = async (req, res) => {
 export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const userId = req.query.userId;
+    // Si la ruta tiene verificarToken, usar req.usuario.id. Si no, permitir req.query.userId
+    const userId = req.usuario?.id || req.query.userId || req.body.id_usuario;
 
     if (!userId) return res.status(400).json({ message: 'Falta el userId' });
 
@@ -393,5 +441,147 @@ export const obtenerEstadoValidacion = async (req, res) => {
   } catch (error) {
     console.error('❌ Error:', error);
     res.status(500).json({ message: "Error al obtener estado", error: error.message });
+  }
+};
+
+// Feed consolidado: Avistamientos de los usuarios a los que sigo
+export const getFeedAvistamientos = async (req, res) => {
+  try {
+    const currentUserId = req.usuario?.id?.toString() || req.query.usuarioId || req.query.id_usuario;
+    
+    if (!currentUserId) {
+      return res.status(400).json({ message: "Se requiere usuarioId o autenticación para obtener el feed" });
+    }
+
+    const usuario = await prisma.usuario.findUnique({ where: { id: currentUserId } });
+    
+    if (!usuario) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    if (!usuario.seguidos || usuario.seguidos.length === 0) {
+      return res.status(200).json({
+        message: "Aún no sigues a ningún usuario. Sigue a otros exploradores para ver sus avistamientos aquí.",
+        feed: [],
+        total: 0
+      });
+    }
+
+    const avistamientos = await prisma.faunaFlora.findMany({
+      where: { id_usuario: { in: usuario.seguidos } },
+      orderBy: { id: 'desc' },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
+    });
+
+    const feed = avistamientos.map((item) => {
+      return {
+        ...item,
+        total_likes: item.likes ? item.likes.length : 0,
+        total_comentarios: item.comentarios ? item.comentarios.length : 0,
+        user_has_liked: item.likes ? item.likes.includes(currentUserId) : false
+      };
+    });
+
+    res.status(200).json({
+      message: "Feed obtenido exitosamente",
+      feed,
+      total: feed.length
+    });
+  } catch (error) {
+    console.error("❌ Error al obtener feed de avistamientos:", error);
+    res.status(500).json({ message: "Error al obtener el feed", error: error.message });
+  }
+};
+
+// Alternar "like" en un avistamiento (dar y quitar sin duplicar)
+export const toggleLikeAvistamiento = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.usuarioId;
+    
+    if (!userId) {
+      return res.status(400).json({ message: "Se requiere autenticación o id_usuario para dar o quitar like" });
+    }
+
+    const avistamiento = await prisma.faunaFlora.findUnique({ where: { id } });
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    const likes = avistamiento.likes || [];
+    const yaDioLike = likes.includes(userId);
+
+    const updatedLikes = yaDioLike 
+      ? likes.filter(likeId => likeId !== userId)
+      : [...likes, userId];
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id },
+      data: { likes: updatedLikes }
+    });
+
+    res.status(200).json({
+      message: yaDioLike ? "Like removido" : "Like agregado exitosamente",
+      liked: !yaDioLike,
+      total_likes: updatedAvistamiento.likes.length,
+      avistamientoId: updatedAvistamiento.id
+    });
+  } catch (error) {
+    console.error("❌ Error al alternar like:", error);
+    res.status(500).json({ message: "Error al procesar el like", error: error.message });
+  }
+};
+
+// Eliminar comentario con moderación (Autor o Administrador)
+export const deleteComentario = async (req, res) => {
+  try {
+    const { id, comentarioId } = req.params;
+    const solicitanteId = req.usuario?.id?.toString() || req.body.id_usuario || req.query.id_usuario;
+    
+    if (!solicitanteId) {
+      return res.status(401).json({ message: "Se requiere autenticación para eliminar un comentario" });
+    }
+
+    const avistamiento = await prisma.faunaFlora.findUnique({ where: { id } });
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    const comentario = avistamiento.comentarios.find(c => c.id === comentarioId);
+    if (!comentario) {
+      return res.status(404).json({ message: "Comentario no encontrado" });
+    }
+
+    const esAutor = comentario.id_usuario === solicitanteId;
+    const esAdmin = req.usuario?.rol === "Administrador";
+
+    if (!esAutor && !esAdmin) {
+      return res.status(403).json({ 
+        message: "No tienes permisos para eliminar este comentario. Solo el autor o un Administrador pueden eliminarlo." 
+      });
+    }
+
+    const updatedComentarios = avistamiento.comentarios.filter(c => c.id !== comentarioId);
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id },
+      data: { comentarios: updatedComentarios }
+    });
+
+    res.status(200).json({
+      message: esAdmin && !esAutor
+        ? "Comentario eliminado por un Administrador (moderación)"
+        : "Comentario eliminado exitosamente",
+      comentarioId,
+      total_comentarios: updatedAvistamiento.comentarios.length,
+      avistamientoId: updatedAvistamiento.id
+    });
+  } catch (error) {
+    console.error("❌ Error al eliminar comentario:", error);
+    res.status(500).json({ message: "Error al eliminar comentario", error: error.message });
   }
 };

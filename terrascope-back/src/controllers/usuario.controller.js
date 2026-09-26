@@ -1,6 +1,7 @@
 import prisma from "../config/db.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import { respondWithError, respondWithControllerError } from "../utils/controller-error.js";
 
 const generarToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || "secreto_por_defecto", {
@@ -132,20 +133,30 @@ export const obtenerUsuarioPorId = async (req, res) => {
         titulo_activo: true,
         historial: true,
         retos_activos: true,
+        seguidores: true,
+        seguidos: true,
         createdAt: true,
         updatedAt: true
       }
     });
     
     if (!usuario) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
-    res.status(200).json(usuario);
-  } catch (error) {
-    res.status(500).json({
-      message: "Error al obtener usuario",
-      error: error.message
+
+    const currentUserId = req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
+    const is_following = currentUserId && usuario.seguidores
+      ? usuario.seguidores.includes(currentUserId.toString())
+      : false;
+
+    res.status(200).json({
+      ...usuario,
+      total_seguidores: usuario.seguidores ? usuario.seguidores.length : 0,
+      total_seguidos: usuario.seguidos ? usuario.seguidos.length : 0,
+      is_following
     });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener usuario");
   }
 };
 
@@ -260,5 +271,152 @@ export const quitarTituloActivo = async (req, res) => {
   } catch (error) {
     console.error("Error al quitar título:", error);
     res.status(500).json({ mensaje: "Error del servidor" });
+  }
+};
+
+// Seguir a un usuario
+export const seguirUsuario = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+
+    if (!followerId) {
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
+    }
+
+    if (targetId.toString() === followerId.toString()) {
+      return respondWithError(res, 400, "CANNOT_FOLLOW_SELF", "No puedes seguirte a ti mismo");
+    }
+
+    const targetUser = await prisma.usuario.findUnique({ where: { id: targetId }, select: { id: true, nombre_usuario: true, seguidores: true } });
+    const followerUser = await prisma.usuario.findUnique({ where: { id: followerId }, select: { id: true, seguidos: true } });
+
+    if (!targetUser || !followerUser) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    if (!followerUser.seguidos.includes(targetId)) {
+      await prisma.usuario.update({
+        where: { id: followerId },
+        data: { seguidos: { push: targetId } }
+      });
+    }
+
+    if (!targetUser.seguidores.includes(followerId)) {
+      await prisma.usuario.update({
+        where: { id: targetId },
+        data: { seguidores: { push: followerId } }
+      });
+    }
+
+    const updatedTarget = await prisma.usuario.findUnique({ where: { id: targetId }, select: { seguidores: true } });
+    const updatedFollower = await prisma.usuario.findUnique({ where: { id: followerId }, select: { seguidos: true } });
+
+    res.status(200).json({
+      message: `Ahora sigues a ${targetUser.nombre_usuario}`,
+      following: true,
+      total_seguidores: updatedTarget.seguidores ? updatedTarget.seguidores.length : 0,
+      total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al seguir usuario");
+  }
+};
+
+// Dejar de seguir a un usuario
+export const dejarDeSeguirUsuario = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+
+    if (!followerId) {
+      return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
+    }
+
+    const targetUser = await prisma.usuario.findUnique({ where: { id: targetId }, select: { id: true, nombre_usuario: true, seguidores: true } });
+    const followerUser = await prisma.usuario.findUnique({ where: { id: followerId }, select: { id: true, seguidos: true } });
+
+    if (!targetUser || !followerUser) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    // Filtrar para remover
+    await prisma.usuario.update({
+      where: { id: followerId },
+      data: { seguidos: followerUser.seguidos.filter(id => id !== targetId) }
+    });
+
+    await prisma.usuario.update({
+      where: { id: targetId },
+      data: { seguidores: targetUser.seguidores.filter(id => id !== followerId) }
+    });
+
+    const updatedTarget = await prisma.usuario.findUnique({ where: { id: targetId }, select: { seguidores: true } });
+    const updatedFollower = await prisma.usuario.findUnique({ where: { id: followerId }, select: { seguidos: true } });
+
+    res.status(200).json({
+      message: `Has dejado de seguir a ${targetUser.nombre_usuario}`,
+      following: false,
+      total_seguidores: updatedTarget.seguidores ? updatedTarget.seguidores.length : 0,
+      total_seguidos: updatedFollower.seguidos ? updatedFollower.seguidos.length : 0
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al dejar de seguir usuario");
+  }
+};
+
+// Obtener lista de seguidores de un usuario
+export const obtenerSeguidores = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const usuario = await prisma.usuario.findUnique({
+      where: { id },
+      select: { seguidores: true }
+    });
+
+    if (!usuario) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    const seguidoresDetalle = await prisma.usuario.findMany({
+      where: { id: { in: usuario.seguidores } },
+      select: { id: true, nombre_usuario: true, email_usuario: true, imagen_perfil: true, rol: true }
+    });
+
+    res.status(200).json({
+      seguidores: seguidoresDetalle,
+      total: seguidoresDetalle.length
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener seguidores");
+  }
+};
+
+// Obtener lista de usuarios seguidos
+export const obtenerSeguidos = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const usuario = await prisma.usuario.findUnique({
+      where: { id },
+      select: { seguidos: true }
+    });
+
+    if (!usuario) {
+      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+    }
+
+    const seguidosDetalle = await prisma.usuario.findMany({
+      where: { id: { in: usuario.seguidos } },
+      select: { id: true, nombre_usuario: true, email_usuario: true, imagen_perfil: true, rol: true }
+    });
+
+    res.status(200).json({
+      seguidos: seguidosDetalle,
+      total: seguidosDetalle.length
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener seguidos");
   }
 };

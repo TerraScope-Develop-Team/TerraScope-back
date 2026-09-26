@@ -7,7 +7,11 @@ import {
   eliminarUsuario,
   seleccionarTituloActivo, 
   quitarTituloActivo,
-  loginUsuario
+  loginUsuario,
+  seguirUsuario,
+  dejarDeSeguirUsuario,
+  obtenerSeguidores,
+  obtenerSeguidos
 } from "../controllers/usuario.controller.js";
 import { verificarToken } from "../middlewares/auth.middleware.js";
 
@@ -102,6 +106,14 @@ router.get("/", verificarToken, obtenerUsuarios);
  */
 router.patch("/titulo-activo", verificarToken, seleccionarTituloActivo);
 router.delete("/titulo-activo", verificarToken, quitarTituloActivo);
+
+// Rutas sociales de seguidores y seguidos (antes de /:id para evitar colisiones)
+router.get("/:id/seguidores", verificarToken, obtenerSeguidores);
+router.get("/:id/seguidos", verificarToken, obtenerSeguidos);
+router.post("/:id/seguir", verificarToken, seguirUsuario);
+router.post("/:id/follow", verificarToken, seguirUsuario); // Alias
+router.post("/:id/dejar-seguir", verificarToken, dejarDeSeguirUsuario);
+router.post("/:id/unfollow", verificarToken, dejarDeSeguirUsuario); // Alias
 
 /**
  * @swagger

@@ -20,6 +20,8 @@ model Usuario {
   titulo_activo       TituloActivo?
   historial           Historial?
   retos_activos       String[]     @db.ObjectId
+  seguidores          String[]     @db.ObjectId
+  seguidos            String[]     @db.ObjectId
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
@@ -100,6 +102,7 @@ model FaunaFlora {
   estado_especimen  String
   habitat           FaunaFloraHabitat?
   comentarios       FaunaFloraComentario[]
+  likes             String[]     @db.ObjectId
   validacion        Validacion?
 
   // Many-to-many para validadores
@@ -121,8 +124,10 @@ type FaunaFloraHabitat {
 }
 
 type FaunaFloraComentario {
+  id             String?  @default(uuid())
   id_usuario     String?  @db.ObjectId
   nombre_usuario String
+  imagen_perfil  String?
   comentario     String
   fecha          DateTime
 }

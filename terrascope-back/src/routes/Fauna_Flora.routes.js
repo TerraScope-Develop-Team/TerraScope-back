@@ -11,6 +11,9 @@ import {
   votarValidacion,
   validarPorExperto,
   obtenerEstadoValidacion,
+  getFeedAvistamientos,
+  toggleLikeAvistamiento,
+  deleteComentario,
 } from "../controllers/fauna_flora.controller.js";
 import { verificarToken } from "../middlewares/auth.middleware.js";
 
@@ -18,6 +21,20 @@ import { verificarToken } from "../middlewares/auth.middleware.js";
 // Fecha: 2025-10-03
 // Descripción: Rutas para manejar las operaciones CRUD de Fauna y Flora
 
+
+/**
+ * @swagger
+ * /fauna-flora/feed:
+ *   get:
+ *     summary: Obtener feed de avistamientos de usuarios seguidos
+ *     tags: [Fauna y Flora]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Feed de avistamientos
+ */
+router.get("/feed", verificarToken, getFeedAvistamientos);
 
 /**
  * @swagger
@@ -123,6 +140,8 @@ router.put("/:id/validar-experto", verificarToken, validarPorExperto);
  *   get:
  *     summary: Obtener estado de validación
  *     tags: [Fauna y Flora]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -131,7 +150,7 @@ router.put("/:id/validar-experto", verificarToken, validarPorExperto);
  *       200:
  *         description: Estado obtenido
  */
-router.get("/:id/validacion", obtenerEstadoValidacion);
+router.get("/:id/validacion", verificarToken, obtenerEstadoValidacion);
 
 /**
  * @swagger
@@ -150,5 +169,45 @@ router.get("/:id/validacion", obtenerEstadoValidacion);
  *         description: Comentario agregado
  */
 router.post("/:id/comentarios", verificarToken, addComentario);
+
+/**
+ * @swagger
+ * /fauna-flora/{id}/comentarios/{comentarioId}:
+ *   delete:
+ *     summary: Eliminar comentario
+ *     tags: [Fauna y Flora]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *       - in: path
+ *         name: comentarioId
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Comentario eliminado
+ */
+router.delete("/:id/comentarios/:comentarioId", verificarToken, deleteComentario);
+
+/**
+ * @swagger
+ * /fauna-flora/{id}/like:
+ *   post:
+ *     summary: Dar o quitar like
+ *     tags: [Fauna y Flora]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Like alternado
+ */
+router.post("/:id/like", verificarToken, toggleLikeAvistamiento);
+router.put("/:id/like", verificarToken, toggleLikeAvistamiento); // Alias flexible
 
 export default router;
