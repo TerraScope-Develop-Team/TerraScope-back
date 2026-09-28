@@ -1,11 +1,13 @@
-import mongoose from "mongoose";
+import { PrismaClient } from '@prisma/client';
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const MONGO_URI = process.env.MONGO_URI;
+const prisma = new PrismaClient();
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log("✅ Conectado a MongoDB"))
-  .catch((err) => console.error("❌ Error conectando a MongoDB:", err));
+// Opcional: Probar la conexión
+prisma.$connect()
+  .then(() => console.log("Conectado a MongoDB con Prisma"))
+  .catch((err) => console.error("Error conectando con Prisma:", err));
+
+export default prisma;

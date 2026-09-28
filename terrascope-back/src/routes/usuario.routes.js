@@ -5,39 +5,157 @@ import {
   obtenerUsuarioPorId,
   actualizarUsuario,
   eliminarUsuario,
-  seleccionarTituloActivo,
+  seleccionarTituloActivo, 
   quitarTituloActivo,
+  loginUsuario,
   seguirUsuario,
   dejarDeSeguirUsuario,
   obtenerSeguidores,
   obtenerSeguidos
 } from "../controllers/usuario.controller.js";
-import {
-  authenticate,
-  requireBodyUserOrAdmin,
-  requireRoles,
-  requireSelfOrAdmin
-} from "../middleware/auth.middleware.js";
+import { verificarToken } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-router.patch("/titulo-activo", authenticate, requireBodyUserOrAdmin(), seleccionarTituloActivo);
-router.delete("/titulo-activo", authenticate, requireBodyUserOrAdmin(), quitarTituloActivo);
-
+/**
+ * @swagger
+ * /usuarios/login:
+ *   post:
+ *     summary: Iniciar sesión
+ *     tags: [Usuarios]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email_usuario:
+ *                 type: string
+ *               contrasenia_usuario:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login exitoso. Devuelve los datos del usuario y el token JWT.
+ *       401:
+ *         description: Credenciales inválidas.
+ */
+router.post("/login", loginUsuario);
+/**
+ * @swagger
+ * /usuarios:
+ *   post:
+ *     summary: Crear un nuevo usuario
+ *     tags: [Usuarios]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - nombre_usuario
+ *               - email_usuario
+ *               - contrasenia_usuario
+ *               - rol
+ *             properties:
+ *               nombre_usuario:
+ *                 type: string
+ *               email_usuario:
+ *                 type: string
+ *               contrasenia_usuario:
+ *                 type: string
+ *               rol:
+ *                 type: string
+ *                 enum: [Usuario, Investigador, Experto, Administrador]
+ *     responses:
+ *       201:
+ *         description: Usuario creado
+ *   get:
+ *     summary: Obtener todos los usuarios
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de usuarios
+ */
 router.post("/", crearUsuario);
-router.get("/", authenticate, requireRoles("Administrador"), obtenerUsuarios);
+router.get("/", verificarToken, obtenerUsuarios);
+
+/**
+ * @swagger
+ * /usuarios/titulo-activo:
+ *   patch:
+ *     summary: Seleccionar título activo
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Título seleccionado
+ *   delete:
+ *     summary: Quitar título activo
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Título quitado
+ */
+router.patch("/titulo-activo", verificarToken, seleccionarTituloActivo);
+router.delete("/titulo-activo", verificarToken, quitarTituloActivo);
 
 // Rutas sociales de seguidores y seguidos (antes de /:id para evitar colisiones)
-router.get("/:id/seguidores", authenticate, obtenerSeguidores);
-router.get("/:id/seguidos", authenticate, obtenerSeguidos);
-router.post("/:id/seguir", authenticate, seguirUsuario);
-router.post("/:id/follow", authenticate, seguirUsuario); // Alias
-router.post("/:id/dejar-seguir", authenticate, dejarDeSeguirUsuario);
-router.post("/:id/unfollow", authenticate, dejarDeSeguirUsuario); // Alias
+router.get("/:id/seguidores", verificarToken, obtenerSeguidores);
+router.get("/:id/seguidos", verificarToken, obtenerSeguidos);
+router.post("/:id/seguir", verificarToken, seguirUsuario);
+router.post("/:id/follow", verificarToken, seguirUsuario); // Alias
+router.post("/:id/dejar-seguir", verificarToken, dejarDeSeguirUsuario);
+router.post("/:id/unfollow", verificarToken, dejarDeSeguirUsuario); // Alias
 
-// Perfil y CRUD de usuario
-router.get("/:id", authenticate, obtenerUsuarioPorId);
-router.patch("/:id", authenticate, requireSelfOrAdmin, actualizarUsuario);
-router.delete("/:id", authenticate, requireRoles("Administrador"), eliminarUsuario);
-
+/**
+ * @swagger
+ * /usuarios/{id}:
+ *   get:
+ *     summary: Obtener usuario por ID
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Usuario encontrado
+ *   patch:
+ *     summary: Actualizar usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado
+ *   delete:
+ *     summary: Eliminar usuario
+ *     tags: [Usuarios]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Usuario eliminado
+ */
+router.get("/:id", verificarToken, obtenerUsuarioPorId);
+router.patch("/:id", verificarToken, actualizarUsuario);
+router.delete("/:id", verificarToken, eliminarUsuario);
 export default router;

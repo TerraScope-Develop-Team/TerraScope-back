@@ -1,5 +1,5 @@
-import Habitat from "../models/habitat.model.js";
-import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
+import prisma from "../config/db.js";
+
 // Autor: César González
 // Fecha: 2025-10-03
 // Descripción: Controladores para manejar las operaciones CRUD de hábitats
@@ -10,45 +10,55 @@ export const createHabitat = async (req, res) => {
     const { nombre_habitat, descripcion_habitat } = req.body;
     
     if (!nombre_habitat || !descripcion_habitat) {
-      return respondWithError(res, 400, "HABITAT_FIELDS_REQUIRED", "Nombre y descripción del hábitat son requeridos");
+      return res.status(400).json({
+        message: "Nombre y descripción del hábitat son requeridos"
+      });
     }
     
-    const newHabitat = new Habitat({
-      nombre_habitat,
-      descripcion_habitat
+    const savedHabitat = await prisma.habitat.create({
+      data: {
+        nombre_habitat,
+        descripcion_habitat
+      }
     });
-    
-    const savedHabitat = await newHabitat.save();
     
     console.log('✅ Hábitat creado:', savedHabitat);
     
     res.status(201).json({
       message: "Hábitat creado exitosamente",
-      data: savedHabitat
+      habitat: savedHabitat
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al crear el hábitat");
+    console.error("❌ Error creando hábitat:", error);
+    res.status(500).json({
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
 // Obtener todos los hábitats
 export const getAllHabitats = async (req, res) => {
   try {
-    const habitats = await Habitat.find();
+    const habitats = await prisma.habitat.findMany();
     
     // 📋 Debug: Ver qué estás enviando
     console.log('📤 Total de hábitats encontrados:', habitats.length);
     if (habitats.length > 0) {
       console.log('🔍 Primer hábitat:', JSON.stringify(habitats[0], null, 2));
-      console.log('🔑 _id del primer hábitat:', habitats[0]._id);
+      console.log('🔑 id del primer hábitat:', habitats[0].id);
     }
     
-    res.status(200).json({
+    res.json({
       message: "Hábitats obtenidos exitosamente",
-      data: habitats
+      habitats
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al obtener los hábitats");
+    console.error("❌ Error obteniendo hábitats:", error);
+    res.status(500).json({
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
@@ -59,21 +69,35 @@ export const getHabitatById = async (req, res) => {
     
     console.log('🔍 Buscando hábitat con ID:', id);
     
-    const habitat = await Habitat.findById(id);
+    const habitat = await prisma.habitat.findUnique({
+      where: { id }
+    });
     
     if (!habitat) {
       console.log('⚠️ Hábitat no encontrado con ID:', id);
-      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
+      return res.status(404).json({
+        message: "Hábitat no encontrado"
+      });
     }
     
     console.log('✅ Hábitat encontrado:', habitat);
     
-    res.status(200).json({
+    res.json({
       message: "Hábitat obtenido exitosamente",
-      data: habitat
+      habitat
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al obtener el hábitat");
+    console.error("❌ Error obteniendo hábitat:", error);
+    // Prisma tira un error de validación si el ID no es de tipo ObjectId (24 char hex string)
+    if (error.code === 'P2023') {
+      return res.status(400).json({
+        message: "ID de hábitat inválido"
+      });
+    }
+    res.status(500).json({
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
@@ -81,30 +105,39 @@ export const getHabitatById = async (req, res) => {
 export const updateHabitat = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre_habitat, descripcion_habitat } = req.body; // ⚠️ CORREGIDO: estaba "nombre_habitad"
+    const { nombre_habitat, descripcion_habitat } = req.body; 
     
     console.log('🔄 Actualizando hábitat ID:', id);
     console.log('📝 Nuevos datos:', { nombre_habitat, descripcion_habitat });
     
-    const updatedHabitat = await Habitat.findByIdAndUpdate(
-      id,
-      { nombre_habitat, descripcion_habitat }, // ⚠️ CORREGIDO
-      { new: true, runValidators: true }
-    );
-    
-    if (!updatedHabitat) {
-      console.log('⚠️ Hábitat no encontrado para actualizar:', id);
-      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
-    }
+    const updatedHabitat = await prisma.habitat.update({
+      where: { id },
+      data: { nombre_habitat, descripcion_habitat }
+    });
     
     console.log('✅ Hábitat actualizado:', updatedHabitat);
     
-    res.status(200).json({
+    res.json({
       message: "Hábitat actualizado exitosamente",
-      data: updatedHabitat
+      habitat: updatedHabitat
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al actualizar el hábitat");
+    console.error("❌ Error actualizando hábitat:", error);
+    if (error.code === 'P2025') { // Record to update not found
+      console.log('⚠️ Hábitat no encontrado para actualizar:', id);
+      return res.status(404).json({
+        message: "Hábitat no encontrado"
+      });
+    }
+    if (error.code === 'P2023') {
+      return res.status(400).json({
+        message: "ID de hábitat inválido"
+      });
+    }
+    res.status(500).json({
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
@@ -115,20 +148,32 @@ export const deleteHabitat = async (req, res) => {
     
     console.log('🗑️ Eliminando hábitat ID:', id);
     
-    const deletedHabitat = await Habitat.findByIdAndDelete(id);
-    
-    if (!deletedHabitat) {
-      console.log('⚠️ Hábitat no encontrado para eliminar:', id);
-      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
-    }
+    const deletedHabitat = await prisma.habitat.delete({
+      where: { id }
+    });
     
     console.log('✅ Hábitat eliminado:', deletedHabitat);
     
-    res.status(200).json({
+    res.json({
       message: "Hábitat eliminado exitosamente",
-      data: deletedHabitat
+      habitat: deletedHabitat
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al eliminar el hábitat");
+    console.error("❌ Error eliminando hábitat:", error);
+    if (error.code === 'P2025') {
+      console.log('⚠️ Hábitat no encontrado para eliminar:', id);
+      return res.status(404).json({
+        message: "Hábitat no encontrado"
+      });
+    }
+    if (error.code === 'P2023') {
+      return res.status(400).json({
+        message: "ID de hábitat inválido"
+      });
+    }
+    res.status(500).json({
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
