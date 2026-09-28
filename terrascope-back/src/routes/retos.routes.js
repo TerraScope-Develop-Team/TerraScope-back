@@ -10,40 +10,147 @@ import {
   obtenerProgresoReto,
   crearRetoManual
 } from "../controllers/retos.controller.js";
-import {
-  authenticate,
-  requireBodyUserOrAdmin,
-  requireParamUserOrAdmin,
-  requireRoles
-} from "../middleware/auth.middleware.js";
+import { verificarToken } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-// Obtener todos los retos activos
+/**
+ * @swagger
+ * /retos/activos:
+ *   get:
+ *     summary: Obtener todos los retos activos
+ *     tags: [Retos]
+ *     responses:
+ *       200:
+ *         description: Lista de retos activos
+ */
 router.get("/activos", obtenerRetosActivos);
 
-// Obtener reto por ID
+/**
+ * @swagger
+ * /retos/{id}:
+ *   get:
+ *     summary: Obtener reto por ID
+ *     tags: [Retos]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Reto obtenido
+ */
 router.get("/:id", obtenerRetoById);
 
-// Inscribirse a un reto
-router.post("/inscribirse", authenticate, requireBodyUserOrAdmin(), inscribirseReto);
+/**
+ * @swagger
+ * /retos/inscribirse:
+ *   post:
+ *     summary: Inscribirse a un reto
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Inscripción exitosa
+ */
+router.post("/inscribirse", verificarToken, inscribirseReto);
 
-// Desinscribirse de un reto
-router.post("/desinscribirse", authenticate, requireBodyUserOrAdmin(), desinscribirseReto);
+/**
+ * @swagger
+ * /retos/desinscribirse:
+ *   post:
+ *     summary: Desinscribirse de un reto
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Desinscripción exitosa
+ */
+router.post("/desinscribirse", verificarToken, desinscribirseReto);
 
-// Obtener tabla de posiciones
+/**
+ * @swagger
+ * /retos/{retoId}/posiciones:
+ *   get:
+ *     summary: Obtener tabla de posiciones
+ *     tags: [Retos]
+ *     parameters:
+ *       - in: path
+ *         name: retoId
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Tabla de posiciones
+ */
 router.get("/:retoId/posiciones", obtenerTablaPosiciones);
 
-// Obtener logros de un usuario
-router.get("/usuario/:usuarioId/logros", authenticate, requireParamUserOrAdmin(), obtenerLogrosUsuario);
+/**
+ * @swagger
+ * /retos/usuario/{usuarioId}/logros:
+ *   get:
+ *     summary: Obtener logros de un usuario
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: usuarioId
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Lista de logros
+ */
+router.get("/usuario/:usuarioId/logros", verificarToken, obtenerLogrosUsuario);
 
-// Cambiar visibilidad de logro
-router.patch("/logro/visibilidad", authenticate, requireBodyUserOrAdmin(), toggleMostrarLogro);
+/**
+ * @swagger
+ * /retos/logro/visibilidad:
+ *   patch:
+ *     summary: Cambiar visibilidad de logro
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Visibilidad cambiada
+ */
+router.patch("/logro/visibilidad", verificarToken, toggleMostrarLogro);
 
-// Obtener progreso en un reto
-router.get("/:retoId/progreso/:usuarioId", authenticate, requireParamUserOrAdmin(), obtenerProgresoReto);
+/**
+ * @swagger
+ * /retos/{retoId}/progreso/{usuarioId}:
+ *   get:
+ *     summary: Obtener progreso en un reto
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: retoId
+ *         required: true
+ *       - in: path
+ *         name: usuarioId
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Progreso del usuario
+ */
+router.get("/:retoId/progreso/:usuarioId", verificarToken, obtenerProgresoReto);
 
-// Crear reto manual (admin)
-router.post("/crear", authenticate, requireRoles("Administrador"), crearRetoManual);
+/**
+ * @swagger
+ * /retos/crear:
+ *   post:
+ *     summary: Crear reto manual (admin)
+ *     tags: [Retos]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Reto creado
+ */
+router.post("/crear", verificarToken, crearRetoManual);
 
 export default router;

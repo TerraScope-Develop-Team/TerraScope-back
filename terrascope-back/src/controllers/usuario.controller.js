@@ -1,6 +1,41 @@
-import mongoose from "mongoose";
-import Usuario from "../models/usuario.model.js";
-import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
+import prisma from "../config/db.js";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+import { respondWithError, respondWithControllerError } from "../utils/controller-error.js";
+
+const generarToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET || "secreto_por_defecto", {
+    expiresIn: process.env.JWT_EXPIRES_IN || "1h",
+  });
+};
+
+export const loginUsuario = async (req, res) => {
+  try {
+    const { email_usuario, contrasenia_usuario } = req.body;
+
+    if (!email_usuario || !contrasenia_usuario) {
+      return res.status(400).json({ message: "Por favor provea email y contraseña" });
+    }
+
+    const usuario = await prisma.usuario.findUnique({
+      where: { email_usuario }
+    });
+
+    if (usuario && (await bcrypt.compare(contrasenia_usuario, usuario.contrasenia_usuario))) {
+      res.json({
+        _id: usuario.id,
+        nombre_usuario: usuario.nombre_usuario,
+        email_usuario: usuario.email_usuario,
+        rol: usuario.rol,
+        token: generarToken(usuario.id),
+      });
+    } else {
+      res.status(401).json({ message: "Email o contraseña incorrectos" });
+    }
+  } catch (error) {
+    res.status(500).json({ message: "Error en el servidor", error: error.message });
+  }
+};
 
 // Crear un usuario
 export const crearUsuario = async (req, res) => {
@@ -17,74 +52,109 @@ export const crearUsuario = async (req, res) => {
 
     // Validar campos requeridos
     if (!nombre_usuario || !email_usuario || !contrasenia_usuario || !rol) {
-      return respondWithError(res, 400, "USER_FIELDS_REQUIRED", "Faltan campos obligatorios");
+      return res.status(400).json({ message: "Faltan campos obligatorios" });
     }
 
+    // Hashear contraseña
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(contrasenia_usuario, salt);
+
     // Crear el nuevo usuario
-    const nuevoUsuario = new Usuario({
-      nombre_usuario,
-      email_usuario,
-      contrasenia_usuario,
-      telefono_usuario,
-      fecha_nac_usuario,
-      rol: {
-        id_rol: rol.id_rol,
-        nombre_rol: rol.nombre_rol || "Usuario"
-      },
-      imagen_perfil: imagen_perfil || ""
+    const nuevoUsuario = await prisma.usuario.create({
+      data: {
+        nombre_usuario,
+        email_usuario,
+        contrasenia_usuario: hashedPassword,
+        telefono_usuario,
+        fecha_nac_usuario: fecha_nac_usuario ? new Date(fecha_nac_usuario) : null,
+        rol,
+        imagen_perfil: imagen_perfil || ""
+      }
     });
 
-    await nuevoUsuario.save();
+    // Remover contraseña de la respuesta
+    const { contrasenia_usuario: _, ...usuarioResponse } = nuevoUsuario;
+
     res.status(201).json({
       message: "Usuario creado correctamente",
-      data: nuevoUsuario
+      data: usuarioResponse
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al crear usuario");
+    res.status(400).json({
+      message: "Error al crear usuario",
+      error: error.message
+    });
   }
 };
 
 // Obtener todos los usuarios
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const usuarios = await Usuario.find().select("-contrasenia_usuario");
+    const usuarios = await prisma.usuario.findMany({
+      select: {
+        id: true,
+        nombre_usuario: true,
+        email_usuario: true,
+        telefono_usuario: true,
+        fecha_nac_usuario: true,
+        imagen_perfil: true,
+        rol: true,
+        logros: true,
+        titulo_activo: true,
+        historial: true,
+        retos_activos: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
     res.status(200).json(usuarios);
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al obtener usuarios");
+    res.status(500).json({
+      message: "Error al obtener usuarios",
+      error: error.message
+    });
   }
 };
 
-// Obtener un usuario por ID (incluye conteo de seguidores y seguidos para el perfil)
+// Obtener un usuario por ID
 export const obtenerUsuarioPorId = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const usuario = await Usuario.findById(req.params.id)
-      .select("-contrasenia_usuario")
-      .populate("seguidores", "nombre_usuario imagen_perfil")
-      .populate("seguidos", "nombre_usuario imagen_perfil");
-
+    const usuario = await prisma.usuario.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        nombre_usuario: true,
+        email_usuario: true,
+        telefono_usuario: true,
+        fecha_nac_usuario: true,
+        imagen_perfil: true,
+        rol: true,
+        logros: true,
+        titulo_activo: true,
+        historial: true,
+        retos_activos: true,
+        seguidores: true,
+        seguidos: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    const usuarioObj = usuario.toObject();
-    usuarioObj.total_seguidores = usuario.seguidores ? usuario.seguidores.length : 0;
-    usuarioObj.total_seguidos = usuario.seguidos ? usuario.seguidos.length : 0;
+    const currentUserId = req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
+    const is_following = currentUserId && usuario.seguidores
+      ? usuario.seguidores.includes(currentUserId.toString())
+      : false;
 
-    // Verificar si el usuario autenticado ya sigue a este perfil
-    const currentUserId = req.user?._id?.toString() || req.query.currentUserId || req.query.id_usuario;
-    if (currentUserId && usuario.seguidores) {
-      usuarioObj.is_following = usuario.seguidores.some(
-        (seg) => (seg._id ? seg._id.toString() : seg.toString()) === currentUserId.toString()
-      );
-    } else {
-      usuarioObj.is_following = false;
-    }
-
-    res.status(200).json(usuarioObj);
+    res.status(200).json({
+      ...usuario,
+      total_seguidores: usuario.seguidores ? usuario.seguidores.length : 0,
+      total_seguidos: usuario.seguidos ? usuario.seguidos.length : 0,
+      is_following
+    });
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener usuario");
   }
@@ -93,83 +163,95 @@ export const obtenerUsuarioPorId = async (req, res) => {
 // Actualizar un usuario
 export const actualizarUsuario = async (req, res) => {
   try {
-    const { imagen_perfil } = req.body;
+    const { imagen_perfil, contrasenia_usuario, ...otrosDatos } = req.body;
 
-    const allowedFields = [
-      "nombre_usuario",
-      "telefono_usuario",
-      "fecha_nac_usuario",
-      "imagen_perfil"
-    ];
-    const updateData = Object.fromEntries(
-      allowedFields
-        .filter((field) => Object.hasOwn(req.body, field))
-        .map((field) => [field, req.body[field]])
-    );
-    if (imagen_perfil === undefined || imagen_perfil === null) {
-      delete updateData.imagen_perfil;
+    const updateData = { ...otrosDatos };
+
+    if (imagen_perfil !== undefined && imagen_perfil !== null) {
+      updateData.imagen_perfil = imagen_perfil;
+    }
+    
+    if (contrasenia_usuario) {
+      const salt = await bcrypt.genSalt(10);
+      updateData.contrasenia_usuario = await bcrypt.hash(contrasenia_usuario, salt);
     }
 
-    const usuarioActualizado = await Usuario.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-
-    if (!usuarioActualizado) {
-      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
-    }
+    const usuarioActualizado = await prisma.usuario.update({
+      where: { id: req.params.id },
+      data: updateData,
+      select: {
+        id: true,
+        nombre_usuario: true,
+        email_usuario: true,
+        rol: true
+      }
+    });
 
     res.status(200).json({
       message: "Usuario actualizado correctamente",
       data: usuarioActualizado
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al actualizar usuario");
+    res.status(400).json({
+      message: "Error al actualizar usuario (quizás no existe)",
+      error: error.message
+    });
   }
 };
 
 // Eliminar un usuario
 export const eliminarUsuario = async (req, res) => {
   try {
-    const usuarioEliminado = await Usuario.findByIdAndDelete(req.params.id);
-    if (!usuarioEliminado) {
-      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
-    }
+    await prisma.usuario.delete({
+      where: { id: req.params.id }
+    });
     res.status(200).json({ message: "Usuario eliminado correctamente" });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al eliminar usuario");
+    res.status(500).json({
+      message: "Error al eliminar usuario",
+      error: error.message
+    });
   }
 };
 
+// Seleccionar titulo activo
 export const seleccionarTituloActivo = async (req, res) => {
   try {
     const { usuarioId, logroId } = req.body;
 
-    const usuario = await Usuario.findById(usuarioId);
+    const usuario = await prisma.usuario.findUnique({
+      where: { id: usuarioId }
+    });
+    
     if (!usuario) {
-      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+      return res.status(404).json({ mensaje: "Usuario no encontrado" });
     }
 
-    const logro = usuario.logros.id(logroId);
+    // Buscar el logro en el array de logros del usuario
+    const logro = usuario.logros?.find(l => l.id === logroId);
     if (!logro) {
-      return respondWithError(res, 404, "ACHIEVEMENT_NOT_FOUND", "Logro no encontrado");
+      return res.status(404).json({ mensaje: "Logro no encontrado" });
     }
 
-    usuario.titulo_activo = {
-      id_logro: logro._id.toString(),
-      nombre_logro: logro.nombre_logro,
-      descripcion_titulo: logro.descripcion_titulo
-    };
-
-    await usuario.save();
+    // Actualizar título activo
+    const usuarioActualizado = await prisma.usuario.update({
+      where: { id: usuarioId },
+      data: {
+        titulo_activo: {
+          id_logro: logro.id,
+          nombre_logro: logro.nombre_logro,
+          descripcion_titulo: logro.descripcion_titulo
+        }
+      }
+    });
 
     res.status(200).json({
       mensaje: "Título actualizado correctamente",
-      titulo_activo: usuario.titulo_activo
+      titulo_activo: usuarioActualizado.titulo_activo
     });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al seleccionar título");
+    console.error("Error al seleccionar título:", error);
+    res.status(500).json({ mensaje: "Error del servidor" });
   }
 };
 
@@ -178,19 +260,17 @@ export const quitarTituloActivo = async (req, res) => {
   try {
     const { usuarioId } = req.body;
 
-    const usuario = await Usuario.findByIdAndUpdate(
-      usuarioId,
-      { $unset: { titulo_activo: "" } },
-      { new: true }
-    );
-
-    if (!usuario) {
-      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
-    }
+    const usuario = await prisma.usuario.update({
+      where: { id: usuarioId },
+      data: {
+        titulo_activo: { unset: true } // MongoDB Prisma forma de quitar un embedded document
+      }
+    });
 
     res.status(200).json({ mensaje: "Título removido correctamente" });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al quitar título");
+    console.error("Error al quitar título:", error);
+    res.status(500).json({ mensaje: "Error del servidor" });
   }
 };
 
@@ -198,37 +278,39 @@ export const quitarTituloActivo = async (req, res) => {
 export const seguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
     }
 
     if (targetId.toString() === followerId.toString()) {
       return respondWithError(res, 400, "CANNOT_FOLLOW_SELF", "No puedes seguirte a ti mismo");
     }
 
-    const [targetUser, followerUser] = await Promise.all([
-      Usuario.findById(targetId),
-      Usuario.findById(followerId)
-    ]);
+    const targetUser = await prisma.usuario.findUnique({ where: { id: targetId }, select: { id: true, nombre_usuario: true, seguidores: true } });
+    const followerUser = await prisma.usuario.findUnique({ where: { id: followerId }, select: { id: true, seguidos: true } });
 
     if (!targetUser || !followerUser) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    // Agregar de forma atómica evitando duplicados
-    await Promise.all([
-      Usuario.findByIdAndUpdate(followerId, { $addToSet: { seguidos: targetId } }),
-      Usuario.findByIdAndUpdate(targetId, { $addToSet: { seguidores: followerId } })
-    ]);
+    if (!followerUser.seguidos.includes(targetId)) {
+      await prisma.usuario.update({
+        where: { id: followerId },
+        data: { seguidos: { push: targetId } }
+      });
+    }
 
-    const updatedTarget = await Usuario.findById(targetId);
-    const updatedFollower = await Usuario.findById(followerId);
+    if (!targetUser.seguidores.includes(followerId)) {
+      await prisma.usuario.update({
+        where: { id: targetId },
+        data: { seguidores: { push: followerId } }
+      });
+    }
+
+    const updatedTarget = await prisma.usuario.findUnique({ where: { id: targetId }, select: { seguidores: true } });
+    const updatedFollower = await prisma.usuario.findUnique({ where: { id: followerId }, select: { seguidos: true } });
 
     res.status(200).json({
       message: `Ahora sigues a ${targetUser.nombre_usuario}`,
@@ -245,33 +327,32 @@ export const seguirUsuario = async (req, res) => {
 export const dejarDeSeguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?._id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
     }
 
-    if (!mongoose.Types.ObjectId.isValid(targetId) || !mongoose.Types.ObjectId.isValid(followerId)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const [targetUser, followerUser] = await Promise.all([
-      Usuario.findById(targetId),
-      Usuario.findById(followerId)
-    ]);
+    const targetUser = await prisma.usuario.findUnique({ where: { id: targetId }, select: { id: true, nombre_usuario: true, seguidores: true } });
+    const followerUser = await prisma.usuario.findUnique({ where: { id: followerId }, select: { id: true, seguidos: true } });
 
     if (!targetUser || !followerUser) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    // Remover de forma atómica
-    await Promise.all([
-      Usuario.findByIdAndUpdate(followerId, { $pull: { seguidos: targetId } }),
-      Usuario.findByIdAndUpdate(targetId, { $pull: { seguidores: followerId } })
-    ]);
+    // Filtrar para remover
+    await prisma.usuario.update({
+      where: { id: followerId },
+      data: { seguidos: followerUser.seguidos.filter(id => id !== targetId) }
+    });
 
-    const updatedTarget = await Usuario.findById(targetId);
-    const updatedFollower = await Usuario.findById(followerId);
+    await prisma.usuario.update({
+      where: { id: targetId },
+      data: { seguidores: targetUser.seguidores.filter(id => id !== followerId) }
+    });
+
+    const updatedTarget = await prisma.usuario.findUnique({ where: { id: targetId }, select: { seguidores: true } });
+    const updatedFollower = await prisma.usuario.findUnique({ where: { id: followerId }, select: { seguidos: true } });
 
     res.status(200).json({
       message: `Has dejado de seguir a ${targetUser.nombre_usuario}`,
@@ -288,22 +369,24 @@ export const dejarDeSeguirUsuario = async (req, res) => {
 export const obtenerSeguidores = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const usuario = await Usuario.findById(id).populate(
-      "seguidores",
-      "nombre_usuario email_usuario imagen_perfil rol"
-    );
+    
+    const usuario = await prisma.usuario.findUnique({
+      where: { id },
+      select: { seguidores: true }
+    });
 
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
+    const seguidoresDetalle = await prisma.usuario.findMany({
+      where: { id: { in: usuario.seguidores } },
+      select: { id: true, nombre_usuario: true, email_usuario: true, imagen_perfil: true, rol: true }
+    });
+
     res.status(200).json({
-      seguidores: usuario.seguidores || [],
-      total: usuario.seguidores ? usuario.seguidores.length : 0
+      seguidores: seguidoresDetalle,
+      total: seguidoresDetalle.length
     });
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener seguidores");
@@ -314,22 +397,24 @@ export const obtenerSeguidores = async (req, res) => {
 export const obtenerSeguidos = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const usuario = await Usuario.findById(id).populate(
-      "seguidos",
-      "nombre_usuario email_usuario imagen_perfil rol"
-    );
+    
+    const usuario = await prisma.usuario.findUnique({
+      where: { id },
+      select: { seguidos: true }
+    });
 
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
+    const seguidosDetalle = await prisma.usuario.findMany({
+      where: { id: { in: usuario.seguidos } },
+      select: { id: true, nombre_usuario: true, email_usuario: true, imagen_perfil: true, rol: true }
+    });
+
     res.status(200).json({
-      seguidos: usuario.seguidos || [],
-      total: usuario.seguidos ? usuario.seguidos.length : 0
+      seguidos: seguidosDetalle,
+      total: seguidosDetalle.length
     });
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener seguidos");

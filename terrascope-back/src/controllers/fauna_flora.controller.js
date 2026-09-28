@@ -1,13 +1,12 @@
-import FaunaFlora from "../models/fauna_flora.model.js";
-import Habitat from "../models/habitat.model.js";
-import Usuario from "../models/usuario.model.js";
-import mongoose from "mongoose";
+import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
-import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 
 // Crear avistamiento
 export const createAvistamiento = async (req, res) => {
   try {
+    console.log('📥 Datos recibidos en createAvistamiento:');
+    console.log(JSON.stringify(req.body, null, 2));
+
     const {
       nombre_comun,
       nombre_cientifico,
@@ -20,54 +19,71 @@ export const createAvistamiento = async (req, res) => {
       estado_especimen,
       habitat,
       tipo,
+      nombre_usuario,
+      id_usuario,
       validacion
     } = req.body;
 
-    // Validar que habitat existe y tiene id_habitat
     if (!habitat || !habitat.id_habitat) {
-      return respondWithError(res, 400, "HABITAT_ID_REQUIRED", "El hábitat es requerido y debe tener un id_habitat");
+      console.log('❌ Habitat no proporcionado o sin ID');
+      return res.status(400).json({ 
+        message: "Habitat es requerido y debe tener un id_habitat" 
+      });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(habitat.id_habitat)) {
-      return respondWithError(res, 400, "INVALID_HABITAT_ID", "El ID del hábitat no tiene un formato válido");
-    }
-
-    const habitatExiste = await Habitat.findById(habitat.id_habitat);
+    // Buscar el habitat en la base de datos
+    const habitatExiste = await prisma.habitat.findUnique({
+      where: { id: habitat.id_habitat }
+    });
+    
     if (!habitatExiste) {
-      return respondWithError(res, 404, "HABITAT_NOT_FOUND", "Hábitat no encontrado");
+      console.log('❌ Habitat no encontrado en la base de datos');
+      return res.status(404).json({ 
+        message: "Habitat no encontrado" 
+      });
     }
 
-    const habitatData = {
-      id_habitat: new mongoose.Types.ObjectId(habitat.id_habitat),
-      nombre_habitat: habitat.nombre_habitat,
-      descripcion_habitat: habitat.descripcion_habitat
-    };
+    console.log('✅ Habitat encontrado:', habitatExiste.nombre_habitat);
 
-    const nuevoAvistamiento = new FaunaFlora({
-      nombre_comun,
-      nombre_cientifico,
-      especie,
-      descripcion,
-      imagen,
-      ubicacion,
-      comportamiento,
-      estado_extincion,
-      estado_especimen,
-      habitat: habitatData,
-      tipo,
-      nombre_usuario: req.user.nombre_usuario,
-      id_usuario: req.user._id,
-      validacion: validacion || {
-        estado: "pendiente",
-        votos_comunidad: 0,
-        requeridos_comunidad: 5,
-        usuarios_validadores: [],
-        validado_por_experto: false
+    console.log('💾 Creando nuevo avistamiento...');
+
+    const nuevoAvistamiento = await prisma.faunaFlora.create({
+      data: {
+        nombre_comun,
+        nombre_cientifico,
+        especie,
+        descripcion,
+        imagen,
+        ubicacion: {
+          latitud: ubicacion.latitud,
+          longitud: ubicacion.longitud
+        },
+        comportamiento,
+        estado_extincion,
+        estado_especimen,
+        habitat: {
+          set: {
+            id_habitat: habitat.id_habitat,
+            nombre_habitat: habitat.nombre_habitat,
+            descripcion_habitat: habitat.descripcion_habitat
+          }
+        },
+        tipo,
+        nombre_usuario,
+        id_usuario: id_usuario || null,
+        validacion: {
+          set: {
+            estado: validacion?.estado || "pendiente",
+            votos_comunidad: validacion?.votos_comunidad || 0,
+            requeridos_comunidad: validacion?.requeridos_comunidad || 5,
+            validado_por_experto: validacion?.validado_por_experto || false
+          }
+        }
       }
     });
-
-    await nuevoAvistamiento.save();
-
+    
+    console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento.id);
+    
     try {
       if (nuevoAvistamiento.id_usuario) {
         await retosService.actualizarHistorial(
@@ -84,13 +100,13 @@ export const createAvistamiento = async (req, res) => {
       message: "Avistamiento creado exitosamente",
       data: nuevoAvistamiento
     });
+
   } catch (error) {
     console.error('❌ Error completo:', error);
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
-      return respondWithError(res, 400, "SIGHTING_VALIDATION_ERROR", "Los datos del avistamiento no son válidos", messages);
-    }
-    return respondWithControllerError(res, error, "Error al crear un avistamiento");
+    res.status(500).json({ 
+      message: "Error al crear un avistamiento", 
+      error: error.message 
+    });
   }
 };
 
@@ -98,30 +114,38 @@ export const createAvistamiento = async (req, res) => {
 export const getAvistamientos = async (req, res) => {
   try {
     const { especie, categoria, usuarioId, id_usuario } = req.query;
-    const currentUserId = req.user?._id?.toString() || usuarioId || id_usuario;
+    const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
+    
     let filter = {};
     if (especie) filter.especie = especie;
-    if (categoria) {
-      filter.especie = categoria;
-    }
-    const avistamientos = await FaunaFlora.find(filter)
-      .sort({ createdAt: -1 })
-      .populate("id_usuario", "nombre_usuario imagen_perfil");
+    if (categoria) filter.especie = categoria; 
 
-    const formatted = avistamientos.map((item) => {
-      const obj = item.toObject();
-      obj.total_likes = item.likes ? item.likes.length : 0;
-      obj.total_comentarios = item.comentarios ? item.comentarios.length : 0;
-      obj.user_has_liked = currentUserId && item.likes
-        ? item.likes.some((l) => l.toString() === currentUserId.toString())
-        : false;
-      return obj;
+    const avistamientos = await prisma.faunaFlora.findMany({
+      where: filter,
+      orderBy: { id: 'desc' },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
+    });
+
+    const formatted = avistamientos.map(item => {
+      return {
+        ...item,
+        total_likes: item.likes ? item.likes.length : 0,
+        total_comentarios: item.comentarios ? item.comentarios.length : 0,
+        user_has_liked: currentUserId && item.likes ? item.likes.includes(currentUserId) : false
+      };
     });
 
     res.status(200).json(formatted);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
-    return respondWithControllerError(res, error, "Error al conseguir los avistamientos");
+    res.status(500).json({ 
+      message: "Error al conseguir los avistamientos", 
+      error: error.message 
+    });
   }
 };
 
@@ -129,134 +153,310 @@ export const getAvistamientos = async (req, res) => {
 export const getAvistamientoById = async (req, res) => {
   try {
     const { usuarioId, id_usuario } = req.query;
-    const currentUserId = req.user?._id?.toString() || usuarioId || id_usuario;
+    const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
 
-    const avistamiento = await FaunaFlora.findById(req.params.id)
-      .populate("id_usuario", "nombre_usuario imagen_perfil")
-      .populate("comentarios.id_usuario", "nombre_usuario imagen_perfil");
-
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: req.params.id },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
+    });
+    
     if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    const obj = avistamiento.toObject();
-    obj.total_likes = avistamiento.likes ? avistamiento.likes.length : 0;
-    obj.total_comentarios = avistamiento.comentarios ? avistamiento.comentarios.length : 0;
-    obj.user_has_liked = currentUserId && avistamiento.likes
-      ? avistamiento.likes.some((l) => l.toString() === currentUserId.toString())
-      : false;
-
-    res.status(200).json(obj);
+    res.status(200).json({
+      ...avistamiento,
+      total_likes: avistamiento.likes ? avistamiento.likes.length : 0,
+      total_comentarios: avistamiento.comentarios ? avistamiento.comentarios.length : 0,
+      user_has_liked: currentUserId && avistamiento.likes ? avistamiento.likes.includes(currentUserId) : false
+    });
   } catch (error) {
     console.error('❌ Error al obtener avistamiento:', error);
-    return respondWithControllerError(res, error, "Error al obtener el avistamiento");
+    res.status(500).json({ 
+      message: "Error al obtener el avistamiento", 
+      error: error.message 
+    });
   }
 };
 
-export const getAvistamientosCercanos = async (req, res) => {
+// Agregar comentario (asociado a avistamiento y autor con fecha/hora)
+export const addComentario = async (req, res) => {
   try {
-    const latitud = Number(req.params.latitud);
-    const longitud = Number(req.params.longitud);
-    const distanciaKm = Number(req.params.distanciaKm);
-
-    if (
-      !Number.isFinite(latitud) || latitud < -90 || latitud > 90 ||
-      !Number.isFinite(longitud) || longitud < -180 || longitud > 180 ||
-      !Number.isFinite(distanciaKm) || distanciaKm <= 0
-    ) {
-      return respondWithError(res, 400, "INVALID_LOCATION_RANGE", "Coordenadas o distancia inválidas");
+    const { comentario } = req.body;
+    
+    if (!comentario || comentario.trim() === "") {
+      return res.status(400).json({ message: "El comentario es requerido" });
     }
 
-    const latitudDelta = distanciaKm / 110.574;
-    const longitudScale = Math.cos((latitud * Math.PI) / 180);
-    const longitudDelta = longitudScale === 0
-      ? 180
-      : Math.min(180, distanciaKm / (111.320 * Math.abs(longitudScale)));
-
-    const candidatos = await FaunaFlora.find({
-      "ubicacion.latitud": { $gte: latitud - latitudDelta, $lte: latitud + latitudDelta },
-      "ubicacion.longitud": { $gte: longitud - longitudDelta, $lte: longitud + longitudDelta }
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: req.params.id }
     });
-
-    const rad = Math.PI / 180;
-    const cercanos = candidatos.filter((avistamiento) => {
-      const deltaLat = (avistamiento.ubicacion.latitud - latitud) * rad;
-      const deltaLon = (avistamiento.ubicacion.longitud - longitud) * rad;
-      const haversine = Math.sin(deltaLat / 2) ** 2 +
-        Math.cos(latitud * rad) *
-        Math.cos(avistamiento.ubicacion.latitud * rad) *
-        Math.sin(deltaLon / 2) ** 2;
-      const distancia = 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-      return distancia <= distanciaKm;
-    });
-
-    return res.status(200).json({ data: cercanos });
-  } catch (error) {
-    return respondWithControllerError(res, error, "Error al buscar avistamientos cercanos");
-  }
-};
-
-export const getAvistamientosPorEspecie = async (req, res) => {
-  try {
-    const avistamientos = await FaunaFlora.find({ especie: req.params.especie });
-    return res.status(200).json({ data: avistamientos });
-  } catch (error) {
-    return respondWithControllerError(res, error, "Error al buscar avistamientos por especie");
-  }
-};
-
-export const getAvistamientosPorUsuario = async (req, res) => {
-  try {
-    const avistamientos = await FaunaFlora.find({ nombre_usuario: req.params.nombreUsuario });
-    return res.status(200).json({ data: avistamientos });
-  } catch (error) {
-    return respondWithControllerError(res, error, "Error al buscar avistamientos por usuario");
-  }
-};
-
-export const updateAvistamiento = async (req, res) => {
-  try {
-    const avistamiento = await FaunaFlora.findById(req.params.id);
+    
     if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    const isAdmin = req.user.rol?.nombre_rol === "Administrador";
-    if (!isAdmin && avistamiento.id_usuario?.toString() !== req.user._id.toString()) {
-      return respondWithError(res, 403, "SIGHTING_UPDATE_FORBIDDEN", "No tienes permisos para este avistamiento");
+    const autorId = req.usuario?.id || req.body.id_usuario;
+    const autorNombre = req.usuario?.nombre_usuario || req.body.nombre_usuario;
+    const autorAvatar = req.usuario?.imagen_perfil || req.body.imagen_perfil || "";
+
+    if (!autorNombre) {
+      return res.status(400).json({ message: "Se requiere usuario autenticado o nombre_usuario" });
     }
 
-    const allowedFields = [
-      "nombre_comun", "nombre_cientifico", "especie", "descripcion", "imagen",
-      "ubicacion", "comportamiento", "estado_extincion", "estado_especimen", "tipo", "habitat"
-    ];
-    for (const field of allowedFields) {
-      if (Object.hasOwn(req.body, field)) avistamiento[field] = req.body[field];
+    let validIdUsuario = null;
+    if (autorId && autorId !== 'null' && autorId !== '000000000000000000000000') {
+      if (/^[0-9a-fA-F]{24}$/.test(autorId)) {
+        validIdUsuario = autorId;
+      }
     }
 
-    await avistamiento.save();
-    return res.status(200).json({ data: avistamiento });
+    const nuevoComentario = {
+      id_usuario: validIdUsuario,
+      nombre_usuario: autorNombre,
+      imagen_perfil: autorAvatar,
+      comentario: comentario.trim(),
+      fecha: new Date()
+    };
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: req.params.id },
+      data: {
+        comentarios: {
+          push: nuevoComentario
+        }
+      }
+    });
+    
+    const comentarioCreado = updatedAvistamiento.comentarios[updatedAvistamiento.comentarios.length - 1];
+    
+    res.status(201).json({
+      message: "Comentario agregado exitosamente",
+      comentario: comentarioCreado,
+      total_comentarios: updatedAvistamiento.comentarios.length,
+      avistamientoId: updatedAvistamiento.id,
+      data: updatedAvistamiento
+    });
   } catch (error) {
-    return respondWithControllerError(res, error, "Error al actualizar el avistamiento");
+    console.error("❌ Error al agregar comentario:", error);
+    res.status(500).json({ 
+      message: "Error al agregar comentario", 
+      error: error.message 
+    });
+  }
+};
+
+export const deleteAvistamiento = async (req, res) => {
+  try {
+    const avistamiento = await prisma.faunaFlora.delete({
+      where: { id: req.params.id }
+    });
+    res.status(200).json({ message: "Avistamiento eliminado correctamente" });
+  } catch (error) {
+    console.error('❌ Error al eliminar avistamiento:', error);
+    res.status(500).json({ 
+      message: "Error al eliminar avistamiento", 
+      error: error.message 
+    });
+  }
+};
+
+export const getFrequentZones = async (req, res) => {
+  try {
+    // Prisma mongo raw aggregation
+    const frequentZones = await prisma.faunaFlora.aggregateRaw({
+      pipeline: [
+        {
+          $group: {
+            _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: { count: { $gt: 1 } }
+        },
+        {
+          $project: {
+            lat: "$_id.lat",
+            lng: "$_id.lng",
+            especie: "$_id.especie",
+            count: 1,
+            _id: 0
+          }
+        }
+      ]
+    });
+    res.status(200).json(frequentZones);
+  } catch (error) {
+    console.error('❌ Error al obtener zonas frecuentes:', error);
+    res.status(500).json({ 
+      message: "Error al obtener zonas frecuentes", 
+      error: error.message 
+    });
+  }
+};
+
+// Votar por comunidad
+export const votarValidacion = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    const { id_usuario } = req.body;
+
+    if (!id_usuario) {
+      return res.status(400).json({ message: "Se requiere el id_usuario" });
+    }
+
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    if (avistamiento.id_usuario && avistamiento.id_usuario === id_usuario) {
+      return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
+    }
+
+    if (avistamiento.usuarios_validadores_ids.includes(id_usuario)) {
+      return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
+    }
+
+    const nuevosVotos = (avistamiento.validacion?.votos_comunidad || 0) + 1;
+    let nuevoEstado = avistamiento.validacion?.estado || "pendiente";
+
+    if (nuevosVotos >= (avistamiento.validacion?.requeridos_comunidad || 5)) {
+      nuevoEstado = "validado_comunidad";
+    }
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: avistamientoId },
+      data: {
+        usuarios_validadores_ids: {
+          push: id_usuario
+        },
+        validacion: {
+          estado: nuevoEstado,
+          votos_comunidad: nuevosVotos,
+          requeridos_comunidad: avistamiento.validacion?.requeridos_comunidad || 5,
+          validado_por_experto: avistamiento.validacion?.validado_por_experto || false
+        }
+      }
+    });
+
+    res.status(200).json({
+      message: "Voto registrado correctamente",
+      estado_actual: updatedAvistamiento.validacion.estado,
+      votos_comunidad: updatedAvistamiento.validacion.votos_comunidad,
+    });
+
+  } catch (error) {
+    console.error('❌ Error al registrar voto:', error);
+    res.status(500).json({ 
+      message: "Error al registrar el voto", 
+      error: error.message 
+    });
+  }
+};
+
+// Validación por experto
+export const validarPorExperto = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    const { id_usuario, rol } = req.body;
+
+    if (!id_usuario || !rol) {
+      return res.status(400).json({ message: "Se requiere id_usuario y rol" });
+    }
+
+    if (!["Investigador", "Administrador"].includes(rol)) {
+      return res.status(403).json({ message: "Usuario no autorizado para validar como experto" });
+    }
+
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id: avistamientoId },
+      data: {
+        validacion: {
+          estado: "validado_experto",
+          votos_comunidad: avistamiento.validacion?.votos_comunidad || 0,
+          requeridos_comunidad: avistamiento.validacion?.requeridos_comunidad || 5,
+          validado_por_experto: true
+        }
+      }
+    });
+
+    res.status(200).json({
+      message: "Avistamiento validado por experto",
+      estado_actual: updatedAvistamiento.validacion.estado,
+    });
+
+  } catch (error) {
+    console.error('❌ Error al validar por experto:', error);
+    res.status(500).json({ 
+      message: "Error al validar por experto", 
+      error: error.message 
+    });
+  }
+};
+
+export const obtenerEstadoValidacion = async (req, res) => {
+  try {
+    const avistamientoId = req.params.id;
+    // Si la ruta tiene verificarToken, usar req.usuario.id. Si no, permitir req.query.userId
+    const userId = req.usuario?.id || req.query.userId || req.body.id_usuario;
+
+    if (!userId) return res.status(400).json({ message: 'Falta el userId' });
+
+    const avistamiento = await prisma.faunaFlora.findUnique({
+      where: { id: avistamientoId }
+    });
+    
+    if (!avistamiento) {
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
+    }
+
+    const validacion = avistamiento.validacion;
+    const yaVoto = avistamiento.usuarios_validadores_ids?.includes(userId) ?? false;
+
+    res.status(200).json({
+      estado: validacion?.estado || "pendiente",
+      votos_comunidad: validacion?.votos_comunidad || 0,
+      requeridos_comunidad: validacion?.requeridos_comunidad || 5,
+      validado_por_experto: validacion?.validado_por_experto || false,
+      usuarios_validadores: avistamiento.usuarios_validadores_ids || [],
+      yaVoto,
+    });
+  } catch (error) {
+    console.error('❌ Error:', error);
+    res.status(500).json({ message: "Error al obtener estado", error: error.message });
   }
 };
 
 // Feed consolidado: Avistamientos de los usuarios a los que sigo
 export const getFeedAvistamientos = async (req, res) => {
   try {
-    const currentUserId = req.user?._id?.toString() || req.query.usuarioId || req.query.id_usuario;
-
+    const currentUserId = req.usuario?.id?.toString() || req.query.usuarioId || req.query.id_usuario;
+    
     if (!currentUserId) {
-      return respondWithError(res, 400, "USER_ID_REQUIRED", "Se requiere usuarioId o autenticación para obtener el feed");
+      return res.status(400).json({ message: "Se requiere usuarioId o autenticación para obtener el feed" });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const usuario = await Usuario.findById(currentUserId);
+    const usuario = await prisma.usuario.findUnique({ where: { id: currentUserId } });
+    
     if (!usuario) {
-      return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
+      return res.status(404).json({ message: "Usuario no encontrado" });
     }
 
     if (!usuario.seguidos || usuario.seguidos.length === 0) {
@@ -267,20 +467,23 @@ export const getFeedAvistamientos = async (req, res) => {
       });
     }
 
-    const avistamientos = await FaunaFlora.find({
-      id_usuario: { $in: usuario.seguidos }
-    })
-      .sort({ createdAt: -1 })
-      .populate("id_usuario", "nombre_usuario imagen_perfil");
+    const avistamientos = await prisma.faunaFlora.findMany({
+      where: { id_usuario: { in: usuario.seguidos } },
+      orderBy: { id: 'desc' },
+      include: {
+        usuario: {
+          select: { nombre_usuario: true, imagen_perfil: true }
+        }
+      }
+    });
 
     const feed = avistamientos.map((item) => {
-      const obj = item.toObject();
-      obj.total_likes = item.likes ? item.likes.length : 0;
-      obj.total_comentarios = item.comentarios ? item.comentarios.length : 0;
-      obj.user_has_liked = item.likes
-        ? item.likes.some((l) => l.toString() === currentUserId.toString())
-        : false;
-      return obj;
+      return {
+        ...item,
+        total_likes: item.likes ? item.likes.length : 0,
+        total_comentarios: item.comentarios ? item.comentarios.length : 0,
+        user_has_liked: item.likes ? item.likes.includes(currentUserId) : false
+      };
     });
 
     res.status(200).json({
@@ -290,7 +493,7 @@ export const getFeedAvistamientos = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error al obtener feed de avistamientos:", error);
-    return respondWithControllerError(res, error, "Error al obtener el feed");
+    res.status(500).json({ message: "Error al obtener el feed", error: error.message });
   }
 };
 
@@ -298,96 +501,38 @@ export const getFeedAvistamientos = async (req, res) => {
 export const toggleLikeAvistamiento = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id?.toString() || req.body.id_usuario || req.body.usuarioId;
-
+    const userId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.usuarioId;
+    
     if (!userId) {
-      return respondWithError(res, 400, "USER_ID_REQUIRED", "Se requiere autenticación o id_usuario para dar o quitar like");
+      return res.status(400).json({ message: "Se requiere autenticación o id_usuario para dar o quitar like" });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return respondWithError(res, 400, "INVALID_USER_ID", "ID de usuario inválido");
-    }
-
-    const avistamiento = await FaunaFlora.findById(id);
+    const avistamiento = await prisma.faunaFlora.findUnique({ where: { id } });
     if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    if (!avistamiento.likes) {
-      avistamiento.likes = [];
-    }
+    const likes = avistamiento.likes || [];
+    const yaDioLike = likes.includes(userId);
 
-    const yaDioLike = avistamiento.likes.some(
-      (likeId) => likeId.toString() === userId.toString()
-    );
+    const updatedLikes = yaDioLike 
+      ? likes.filter(likeId => likeId !== userId)
+      : [...likes, userId];
 
-    if (yaDioLike) {
-      avistamiento.likes = avistamiento.likes.filter(
-        (likeId) => likeId.toString() !== userId.toString()
-      );
-    } else {
-      avistamiento.likes.push(userId);
-    }
-
-    await avistamiento.save();
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id },
+      data: { likes: updatedLikes }
+    });
 
     res.status(200).json({
       message: yaDioLike ? "Like removido" : "Like agregado exitosamente",
       liked: !yaDioLike,
-      total_likes: avistamiento.likes.length,
-      avistamientoId: avistamiento._id
+      total_likes: updatedAvistamiento.likes.length,
+      avistamientoId: updatedAvistamiento.id
     });
   } catch (error) {
     console.error("❌ Error al alternar like:", error);
-    return respondWithControllerError(res, error, "Error al procesar el like");
-  }
-};
-
-// Agregar comentario (asociado a avistamiento y autor con fecha/hora)
-export const addComentario = async (req, res) => {
-  try {
-    const { comentario } = req.body;
-    
-    if (!comentario || comentario.trim() === "") {
-      return respondWithError(res, 400, "COMMENT_FIELDS_REQUIRED", "El comentario es requerido");
-    }
-
-    const avistamiento = await FaunaFlora.findById(req.params.id);
-    if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
-    }
-
-    const autorId = req.user?._id || req.body.id_usuario;
-    const autorNombre = req.user?.nombre_usuario || req.body.nombre_usuario;
-    const autorAvatar = req.user?.imagen_perfil || req.body.imagen_perfil || "";
-
-    if (!autorNombre) {
-      return respondWithError(res, 400, "AUTHOR_REQUIRED", "Se requiere usuario autenticado o nombre_usuario");
-    }
-
-    const nuevoComentario = {
-      id_usuario: autorId,
-      nombre_usuario: autorNombre,
-      imagen_perfil: autorAvatar,
-      comentario: comentario.trim(),
-      fecha: new Date()
-    };
-
-    avistamiento.comentarios.push(nuevoComentario);
-    await avistamiento.save();
-    
-    const comentarioCreado = avistamiento.comentarios[avistamiento.comentarios.length - 1];
-
-    res.status(201).json({
-      message: "Comentario agregado exitosamente",
-      comentario: comentarioCreado,
-      total_comentarios: avistamiento.comentarios.length,
-      avistamientoId: avistamiento._id,
-      data: avistamiento
-    });
-  } catch (error) {
-    console.error("❌ Error al agregar comentario:", error);
-    return respondWithControllerError(res, error, "Error al agregar comentario");
+    res.status(500).json({ message: "Error al procesar el like", error: error.message });
   }
 };
 
@@ -395,193 +540,48 @@ export const addComentario = async (req, res) => {
 export const deleteComentario = async (req, res) => {
   try {
     const { id, comentarioId } = req.params;
-    const solicitanteId = req.user?._id?.toString() || req.body.id_usuario || req.query.id_usuario;
-
+    const solicitanteId = req.usuario?.id?.toString() || req.body.id_usuario || req.query.id_usuario;
+    
     if (!solicitanteId) {
-      return respondWithError(res, 401, "AUTHENTICATION_REQUIRED", "Se requiere autenticación para eliminar un comentario");
+      return res.status(401).json({ message: "Se requiere autenticación para eliminar un comentario" });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(comentarioId)) {
-      return respondWithError(res, 400, "INVALID_ID", "ID de avistamiento o comentario inválido");
-    }
-
-    const avistamiento = await FaunaFlora.findById(id);
+    const avistamiento = await prisma.faunaFlora.findUnique({ where: { id } });
     if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
+      return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    const comentario = avistamiento.comentarios.id(comentarioId);
+    const comentario = avistamiento.comentarios.find(c => c.id === comentarioId);
     if (!comentario) {
-      return respondWithError(res, 404, "COMMENT_NOT_FOUND", "Comentario no encontrado");
+      return res.status(404).json({ message: "Comentario no encontrado" });
     }
 
-    const esAutor = comentario.id_usuario && comentario.id_usuario.toString() === solicitanteId.toString();
-    const esAdmin = req.user?.rol?.nombre_rol === "Administrador";
+    const esAutor = comentario.id_usuario === solicitanteId;
+    const esAdmin = req.usuario?.rol === "Administrador";
 
     if (!esAutor && !esAdmin) {
-      return respondWithError(
-        res,
-        403,
-        "COMMENT_DELETE_FORBIDDEN",
-        "No tienes permisos para eliminar este comentario. Solo el autor o un Administrador pueden eliminarlo."
-      );
+      return res.status(403).json({ 
+        message: "No tienes permisos para eliminar este comentario. Solo el autor o un Administrador pueden eliminarlo." 
+      });
     }
 
-    avistamiento.comentarios.pull({ _id: comentarioId });
-    await avistamiento.save();
+    const updatedComentarios = avistamiento.comentarios.filter(c => c.id !== comentarioId);
+
+    const updatedAvistamiento = await prisma.faunaFlora.update({
+      where: { id },
+      data: { comentarios: updatedComentarios }
+    });
 
     res.status(200).json({
       message: esAdmin && !esAutor
         ? "Comentario eliminado por un Administrador (moderación)"
         : "Comentario eliminado exitosamente",
       comentarioId,
-      total_comentarios: avistamiento.comentarios.length,
-      avistamientoId: avistamiento._id
+      total_comentarios: updatedAvistamiento.comentarios.length,
+      avistamientoId: updatedAvistamiento.id
     });
   } catch (error) {
     console.error("❌ Error al eliminar comentario:", error);
-    return respondWithControllerError(res, error, "Error al eliminar comentario");
-  }
-};
-
-export const deleteAvistamiento = async (req, res) => {
-  try {
-    const avistamiento = await FaunaFlora.findById(req.params.id);
-    if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
-    }
-
-    const isAdmin = req.user.rol?.nombre_rol === "Administrador";
-    if (!isAdmin && avistamiento.id_usuario?.toString() !== req.user._id.toString()) {
-      return respondWithError(res, 403, "SIGHTING_DELETE_FORBIDDEN", "No tienes permisos para este avistamiento");
-    }
-
-    await avistamiento.deleteOne();
-    res.status(200).json({ message: "Avistamiento eliminado correctamente" });
-  } catch (error) {
-    console.error('❌ Error al eliminar avistamiento:', error);
-    return respondWithControllerError(res, error, "Error al eliminar avistamiento");
-  }
-};
-
-export const getFrequentZones = async (req, res) => {
-  try {
-    const frequentZones = await FaunaFlora.aggregate([
-      {
-        $group: {
-          _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $match: { count: { $gt: 1 } }
-      },
-      {
-        $project: {
-          lat: "$_id.lat",
-          lng: "$_id.lng",
-          especie: "$_id.especie",
-          count: 1,
-          _id: 0
-        }
-      }
-    ]);
-    res.status(200).json(frequentZones);
-  } catch (error) {
-    console.error('❌ Error al obtener zonas frecuentes:', error);
-    return respondWithControllerError(res, error, "Error al obtener zonas frecuentes");
-  }
-};
-
-// Votar por comunidad
-export const votarValidacion = async (req, res) => {
-  try {
-    const avistamientoId = req.params.id;
-    const id_usuario = req.user._id.toString();
-
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
-    }
-
-    if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario) {
-      return respondWithError(res, 403, "SELF_VOTE_FORBIDDEN", "No puedes votar tu propio avistamiento");
-    }
-
-    if (avistamiento.validacion.usuarios_validadores.includes(id_usuario)) {
-      return respondWithError(res, 409, "ALREADY_VOTED", "Este usuario ya validó este avistamiento");
-    }
-
-    avistamiento.validacion.usuarios_validadores.push(id_usuario);
-    avistamiento.validacion.votos_comunidad += 1;
-
-    if (avistamiento.validacion.votos_comunidad >= avistamiento.validacion.requeridos_comunidad) {
-      avistamiento.validacion.estado = "validado_comunidad";
-    }
-
-    await avistamiento.save();
-
-    res.status(200).json({
-      message: "Voto registrado correctamente",
-      estado_actual: avistamiento.validacion.estado,
-      votos_comunidad: avistamiento.validacion.votos_comunidad,
-    });
-
-  } catch (error) {
-    console.error('❌ Error al registrar voto:', error);
-    return respondWithControllerError(res, error, "Error al registrar el voto");
-  }
-};
-
-// Validación por experto
-export const validarPorExperto = async (req, res) => {
-  try {
-    const avistamientoId = req.params.id;
-
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
-    }
-
-    avistamiento.validacion.validado_por_experto = true;
-    avistamiento.validacion.estado = "validado_experto";
-
-    await avistamiento.save();
-
-    res.status(200).json({
-      message: "Avistamiento validado por experto",
-      estado_actual: avistamiento.validacion.estado,
-    });
-
-  } catch (error) {
-    console.error('❌ Error al validar por experto:', error);
-    return respondWithControllerError(res, error, "Error al validar por experto");
-  }
-};
-
-export const obtenerEstadoValidacion = async (req, res) => {
-  try {
-    const avistamientoId = req.params.id;
-    const userId = req.user._id.toString();
-
-    const avistamiento = await FaunaFlora.findById(avistamientoId);
-    if (!avistamiento) {
-      return respondWithError(res, 404, "SIGHTING_NOT_FOUND", "Avistamiento no encontrado");
-    }
-
-    const validacion = avistamiento.validacion;
-    const yaVoto = validacion.usuarios_validadores?.includes(userId) ?? false;
-
-    res.status(200).json({
-      estado: validacion.estado,
-      votos_comunidad: validacion.votos_comunidad,
-      requeridos_comunidad: validacion.requeridos_comunidad,
-      validado_por_experto: validacion.validado_por_experto,
-      usuarios_validadores: validacion.usuarios_validadores,
-      yaVoto,
-    });
-  } catch (error) {
-    console.error('❌ Error:', error);
-    return respondWithControllerError(res, error, "Error al obtener estado");
+    res.status(500).json({ message: "Error al eliminar comentario", error: error.message });
   }
 };

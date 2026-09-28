@@ -1,6 +1,4 @@
-import Reto from "../models/reto.model.js";
-import Usuario from "../models/usuario.model.js";
-import FaunaFlora from "../models/fauna_flora.model.js";
+import prisma from "../config/db.js";
 import observerService from "./observer.service.js";
 import cron from "node-cron";
 import moment from "moment-timezone";
@@ -80,221 +78,240 @@ function shuffleArray(array) {
 }
 
 class RetosService {
-constructor() {
-this.inicializarCron();
-}
+  constructor() {
+    this.inicializarCron();
+  }
 
-inicializarCron() {
-  // Ejecutar cada 10 minutos
-  cron.schedule("*/10 * * * *", async () => {
-    console.log("🔄 Generando nuevos retos dinámicos...");
-    await this.generarRetosAutomaticos();
-  });
+  inicializarCron() {
+    // Ejecutar cada semana (Lunes a las 00:00)
+    cron.schedule("0 0 * * 1", async () => {
+      console.log("🔄 Generando nuevos retos dinámicos semanales...");
+      await this.generarRetosAutomaticos();
+    });
 
-  console.log("✅ Cron job para retos configurado (cada 10 minutos)");
-}
+    console.log("✅ Cron job para retos configurado (cada semana)");
+  }
 
 
-async generarRetosAutomaticos() {
-try {
-  const MAX_RETOS_ACTIVOS = 3;
+  async generarRetosAutomaticos() {
+    try {
+      const MAX_RETOS_ACTIVOS = 3;
 
-  // Verificar cuantos retos activos hay actualmente
-    const retosActivosCount = await Reto.countDocuments({ estado: "activo" });
-    if (retosActivosCount >= MAX_RETOS_ACTIVOS) {
-      console.log(`🔔 Hay ${retosActivosCount} retos activos, se finalizarán algunos retos para poder generar nuevos.`);
+      // Verificar cuantos retos activos hay actualmente
+      const retosActivosCount = await prisma.reto.count({ where: { estado: "activo" } });
+      if (retosActivosCount >= MAX_RETOS_ACTIVOS) {
+        console.log(`🔔 Hay ${retosActivosCount} retos activos, se finalizarán algunos retos para poder generar nuevos.`);
 
-      // Buscar los retos activos más antiguos para finalizar (solo los necesarios para bajar el conteo)
-      const retosParaFinalizar = await Reto.find({ estado: "activo" })
-        .sort({ fecha_inicio: 1 }) // ordenar por fecha de inicio ascendente (los más viejos primero)
-        .limit(retosActivosCount - MAX_RETOS_ACTIVOS + 1);
+        // Buscar los retos activos más antiguos para finalizar
+        const retosParaFinalizar = await prisma.reto.findMany({
+          where: { estado: "activo" },
+          orderBy: { fecha_inicio: 'asc' },
+          take: retosActivosCount - MAX_RETOS_ACTIVOS + 1
+        });
 
-      for (const reto of retosParaFinalizar) {
-        reto.estado = "finalizado";
-        await reto.save();
-        console.log(`⏱️ Reto forzado a finalizado para liberar espacio: ${reto.nombre_reto}`);
+        for (const reto of retosParaFinalizar) {
+          await prisma.reto.update({
+            where: { id: reto.id },
+            data: { estado: "finalizado" }
+          });
+          console.log(`⏱️ Reto forzado a finalizado para liberar espacio: ${reto.nombre_reto}`);
+        }
       }
+
+
+      // Primero finalizar retos expirados para evitar solapamientos
+      await this.finalizarRetosExpirados();
+
+      // --- ESPECIES POPULARES ---
+      // AggregateRaw en Prisma para MongoDB
+      const especiesPopularesRaw = await prisma.faunaFlora.aggregateRaw({
+        pipeline: [
+          { $group: { _id: { tipo: "$tipo", especie: "$especie" }, count: { $sum: 1 } } },
+          { $match: { count: { $gte: 4 } } },
+          { $sort: { count: -1 } }
+        ]
+      });
+      
+      const especiesPopulares = Array.isArray(especiesPopularesRaw) ? especiesPopularesRaw : [];
+
+      if (especiesPopulares.length === 0) {
+        console.log("No hay especies populares suficientes para generar retos.");
+      } else {
+        // Mantener las 2 especies más populares fijas
+        const topDos = especiesPopulares.slice(0, 2);
+
+        // Las demás especies populares para posible variación
+        const resto = especiesPopulares.slice(2);
+
+        // Mezclar resto y seleccionar suficientes para completar un total de 5 retos populares
+        const cantidadResto = Math.max(0, 5 - topDos.length);
+        const restoAleatorio = shuffleArray(resto).slice(0, cantidadResto);
+
+        const especiesParaRetos = topDos.concat(restoAleatorio);
+
+        for (const tendencia of especiesParaRetos) {
+          const { tipo, especie } = tendencia._id;
+          const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
+          const cantidad = ia.avistamientos; 
+
+          // Finalizar retos activos anteriores de la misma especie
+          // Para JSON en Prisma MongoDB no se puede filtrar directo en la query fácilmente, buscamos todos y filtramos
+          const retosActivos = await prisma.reto.findMany({ where: { estado: "activo" } });
+          const retosExistentes = retosActivos.filter(r => 
+            (r.condiciones?.fauna?.[especie] !== undefined) || (r.condiciones?.flora?.[especie] !== undefined)
+          );
+
+          for (const retoExistente of retosExistentes) {
+            await prisma.reto.update({
+              where: { id: retoExistente.id },
+              data: { estado: "finalizado" }
+            });
+            console.log(`⏱️ Reto anterior finalizado: ${retoExistente.nombre_reto}`);
+          }
+
+          // Hora local de México
+          const ahora = moment().tz("America/Mexico_City").toDate();
+          const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
+
+          const condicionKey = tipo === "Fauna" ? `fauna` : `flora`;
+          const condiciones = { [condicionKey]: { [especie]: cantidad } };
+
+          const nombreReto = ia.nombre;
+          const descripcionReto = ia.descripcion;
+
+          const nuevoReto = await prisma.reto.create({
+            data: {
+              nombre_reto: nombreReto,
+              descripcion_reto: descripcionReto,
+              fecha_inicio: ahora,
+              fecha_final: fechaFinal,
+              condiciones: condiciones,
+              es_temporal: true,
+              estado: "activo"
+            }
+          });
+
+          await observerService.notify("NUEVO_RETO", nuevoReto);
+
+          console.log(`✅ Nuevo reto creado: ${nombreReto}`);
+        }
+      }
+
+      // --- ESPECIES RARAS ---
+      const conteoPorTipoRaw = await prisma.faunaFlora.aggregateRaw({
+        pipeline: [
+          { $group: { _id: "$tipo", total: { $sum: 1 } } }
+        ]
+      });
+      const conteoPorTipo = Array.isArray(conteoPorTipoRaw) ? conteoPorTipoRaw : [];
+
+      let tipoMenosRegistros = "Fauna"; // default
+      if (conteoPorTipo.length === 1) {
+        tipoMenosRegistros = conteoPorTipo[0]._id;
+      } else if (conteoPorTipo.length === 2) {
+        tipoMenosRegistros = conteoPorTipo[0].total < conteoPorTipo[1].total ? conteoPorTipo[0]._id : conteoPorTipo[1]._id;
+      }
+
+      const especiesRarasRaw = await prisma.faunaFlora.aggregateRaw({
+        pipeline: [
+          { $match: { tipo: tipoMenosRegistros } },
+          { $group: { _id: { tipo: "$tipo", especie: "$especie" }, count: { $sum: 1 } } },
+          { $match: { count: { $lt: 4 } } },
+          { $sort: { count: 1 } },
+          { $limit: 5 }
+        ]
+      });
+      const especiesRaras = Array.isArray(especiesRarasRaw) ? especiesRarasRaw : [];
+
+      for (const rareza of especiesRaras) {
+        const { tipo, especie } = rareza._id;
+
+        const retosActivos = await prisma.reto.findMany({ where: { estado: "activo" } });
+        const retosExistentes = retosActivos.filter(r => 
+          (r.condiciones?.fauna?.[especie] !== undefined) || (r.condiciones?.flora?.[especie] !== undefined)
+        );
+
+        for (const retoExistente of retosExistentes) {
+          await prisma.reto.update({
+            where: { id: retoExistente.id },
+            data: { estado: "finalizado" }
+          });
+          console.log(`⏱️ Reto anterior finalizado: ${retoExistente.nombre_reto}`);
+        }
+
+        const ahora = moment().tz("America/Mexico_City").toDate();
+        const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
+
+        const condicionKey = tipo === "Fauna" ? `fauna` : `flora`;
+        const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
+        const cantidad = ia.avistamientos;
+        const condiciones = { [condicionKey]: { [especie]: cantidad } };
+
+        const nombreReto = ia.nombre;
+        const descripcionReto = ia.descripcion;
+
+        const nuevoReto = await prisma.reto.create({
+          data: {
+            nombre_reto: nombreReto,
+            descripcion_reto: descripcionReto,
+            fecha_inicio: ahora,
+            fecha_final: fechaFinal,
+            condiciones: condiciones,
+            es_temporal: true,
+            estado: "activo"
+          }
+        });
+
+        await observerService.notify("NUEVO_RETO", nuevoReto);
+        console.log(`✅ Nuevo reto raro creado: ${nombreReto}`);
+      }
+    } catch (error) {
+      console.error("❌ Error generando retos automáticos:", error);
     }
+  }
+  
+  async finalizarRetosExpirados() {
+    try {
+      const ahora = moment().tz("America/Mexico_City").toDate();
 
+      const retosExpirados = await prisma.reto.findMany({
+        where: {
+          fecha_final: { lte: ahora },
+          estado: "activo"
+        }
+      });
 
-// Primero finalizar retos expirados para evitar solapamientos
-await this.finalizarRetosExpirados();
+      if (retosExpirados.length === 0) {
+        console.log("No hay retos expirados para finalizar.");
+      }
 
-// --- ESPECIES POPULARES ---
-const especiesPopulares = await FaunaFlora.aggregate([
-  { $group: { _id: { tipo: "$tipo", especie: "$especie" }, count: { $sum: 1 } } },
-  { $match: { count: { $gte: 4 } } },
-  { $sort: { count: -1 } }
-]);
-
-if (especiesPopulares.length === 0) {
-  console.log("No hay especies populares suficientes para generar retos.");
-} else {
-  // Mantener las 2 especies más populares fijas
-  const topDos = especiesPopulares.slice(0, 2);
-
-  // Las demás especies populares para posible variación
-  const resto = especiesPopulares.slice(2);
-
-  // Mezclar resto y seleccionar suficientes para completar un total de 5 retos populares
-  const cantidadResto = Math.max(0, 5 - topDos.length);
-  const restoAleatorio = shuffleArray(resto).slice(0, cantidadResto);
-
-  const especiesParaRetos = topDos.concat(restoAleatorio);
-
-  for (const tendencia of especiesParaRetos) {
-    const { tipo, especie } = tendencia._id;
-    const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
-    const cantidad = ia.avistamientos; 
-
-    // Finalizar retos activos anteriores de la misma especie
-    const retosExistentes = await Reto.find({
-      estado: "activo",
-      $or: [
-        { [`condiciones.fauna.${especie}`]: { $exists: true } },
-        { [`condiciones.flora.${especie}`]: { $exists: true } }
-      ]
-    });
-
-    for (const retoExistente of retosExistentes) {
-      retoExistente.estado = "finalizado";
-      await retoExistente.save();
-      console.log(`⏱️ Reto anterior finalizado: ${retoExistente.nombre_reto}`);
+      for (const reto of retosExpirados) {
+        await prisma.reto.update({
+          where: { id: reto.id },
+          data: { estado: "finalizado" }
+        });
+        console.log(`⏱️ Reto finalizado: ${reto.nombre_reto}`);
+      }
+    } catch (error) {
+      console.error("❌ Error finalizando retos:", error);
     }
-
-    // Hora local de México
-    const ahora = moment().tz("America/Mexico_City").toDate();
-    const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
-
-    const condicionKey = tipo === "Fauna" ? `fauna.${especie}` : `flora.${especie}`;
-    const condiciones = { [condicionKey]: cantidad };
-
-    const nombreReto = ia.nombre;
-    const descripcionReto = ia.descripcion;
-
-    const nuevoReto = new Reto({
-      nombre_reto: nombreReto,
-      descripcion_reto: descripcionReto,
-      fecha_inicio: ahora,
-      fecha_final: fechaFinal,
-      condiciones: condiciones,
-      es_temporal: true,
-      estado: "activo"
-    });
-
-    await nuevoReto.save();
-    await observerService.notify("NUEVO_RETO", nuevoReto);
-
-    console.log(`✅ Nuevo reto creado: ${nombreReto}`);
-  }
-}
-
-// --- ESPECIES RARAS ---
-
-// Contar registros totales por tipo para decidir qué tipo tiene menos registros
-const conteoPorTipo = await FaunaFlora.aggregate([
-  { $group: { _id: "$tipo", total: { $sum: 1 } } }
-]);
-// Determinar tipo con menos registros
-let tipoMenosRegistros = "Fauna"; // default
-if (conteoPorTipo.length === 1) {
-  tipoMenosRegistros = conteoPorTipo[0]._id;
-} else if (conteoPorTipo.length === 2) {
-  tipoMenosRegistros = conteoPorTipo[0].total < conteoPorTipo[1].total ? conteoPorTipo[0]._id : conteoPorTipo[1]._id;
-}
-
-// Obtener especies raras solo del tipo con menos registros
-const especiesRaras = await FaunaFlora.aggregate([
-  { $match: { tipo: tipoMenosRegistros } },
-  { $group: { _id: { tipo: "$tipo", especie: "$especie" }, count: { $sum: 1 } } },
-  { $match: { count: { $lt: 4 } } },
-  { $sort: { count: 1 } },
-  { $limit: 5 }
-]);
-
-for (const rareza of especiesRaras) {
-  const { tipo, especie } = rareza._id;
-
-  const retosExistentes = await Reto.find({
-    estado: "activo",
-    $or: [
-      { [`condiciones.fauna.${especie}`]: { $exists: true } },
-      { [`condiciones.flora.${especie}`]: { $exists: true } }
-    ]
-  });
-
-  for (const retoExistente of retosExistentes) {
-    retoExistente.estado = "finalizado";
-    await retoExistente.save();
-    console.log(`⏱️ Reto anterior finalizado: ${retoExistente.nombre_reto}`);
   }
 
-  const ahora = moment().tz("America/Mexico_City").toDate();
-  const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
-
-  const condicionKey = tipo === "Fauna" ? `fauna.${especie}` : `flora.${especie}`;
-  const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
-  const cantidad = ia.avistamientos;
-  const condiciones = { [condicionKey]: cantidad };
-
-  const nombreReto = ia.nombre;
-  const descripcionReto = ia.descripcion;
-
-  const nuevoReto = new Reto({
-    nombre_reto: nombreReto,
-    descripcion_reto: descripcionReto,
-    fecha_inicio: ahora,
-    fecha_final: fechaFinal,
-    condiciones: condiciones,
-    es_temporal: true,
-    estado: "activo"
-  });
-
-  await nuevoReto.save();
-  await observerService.notify("NUEVO_RETO", nuevoReto);
-
-  console.log(`✅ Nuevo reto raro creado: ${nombreReto}`);
-}
-} catch (error) {
-console.error("❌ Error generando retos automáticos:", error);
-}
-}
-async finalizarRetosExpirados() {
-try {
-const ahora = moment().tz("America/Mexico_City").toDate();
-
-  const retosExpirados = await Reto.find({
-    fecha_final: { $lte: ahora },
-    estado: "activo"
-  });
-
-  if (retosExpirados.length === 0) {
-    console.log("No hay retos expirados para finalizar.");
-  }
-
-  for (const reto of retosExpirados) {
-    reto.estado = "finalizado";
-    await reto.save();
-    console.log(`⏱️ Reto finalizado: ${reto.nombre_reto}`);
-  }
-} catch (error) {
-  console.error("❌ Error finalizando retos:", error);
-}
-
-}
   async verificarProgreso(usuarioId) {
     try {
       console.log(`🔍 Verificando progreso para usuario: ${usuarioId}`);
       
-      const usuario = await Usuario.findById(usuarioId);
+      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
       if (!usuario) {
         console.log("❌ Usuario no encontrado");
         return;
       }
 
-      const retosActivos = await Reto.find({
-        _id: { $in: usuario.retos_activos },
-        estado: "activo"
+      const retosActivos = await prisma.reto.findMany({
+        where: {
+          id: { in: usuario.retos_activos },
+          estado: "activo"
+        }
       });
 
       console.log(`📋 Retos activos del usuario: ${retosActivos.length}`);
@@ -307,7 +324,7 @@ const ahora = moment().tz("America/Mexico_City").toDate();
         
         if (cumpleCondiciones) {
           console.log(`✅ ¡Usuario cumple todas las condiciones!`);
-          await this.completarReto(usuarioId, reto._id);
+          await this.completarReto(usuarioId, reto.id);
         } else {
           console.log(`❌ Aún no cumple todas las condiciones`);
         }
@@ -320,18 +337,39 @@ const ahora = moment().tz("America/Mexico_City").toDate();
   async verificarCondiciones(usuario, reto) {
     try {
       console.log(`\n📊 Historial del usuario:`, {
-        fauna: usuario.historial.fauna || {},
-        flora: usuario.historial.flora || {}
+        fauna: usuario.historial?.fauna || {},
+        flora: usuario.historial?.flora || {}
       });
 
-      for (const [key, valorRequerido] of Object.entries(reto.condiciones)) {
+      if (!reto.condiciones) return false;
+
+      // Iterar sobre condiciones. Las condiciones ahora están guardadas como JSON anidado
+      // { fauna: { Mamífero: 2 } } o si estaba plano { "fauna.Mamífero": 2 }
+      
+      const flattenObj = (ob) => {
+        let result = {};
+        for (const i in ob) {
+            if ((typeof ob[i]) === 'object' && !Array.isArray(ob[i])) {
+                const temp = flattenObj(ob[i]);
+                for (const j in temp) {
+                    result[i + '.' + j] = temp[j];
+                }
+            }
+            else {
+                result[i] = ob[i];
+            }
+        }
+        return result;
+      };
+
+      const condiciones = flattenObj(reto.condiciones);
+
+      for (const [key, valorRequerido] of Object.entries(condiciones)) {
         console.log(`\n🔍 Verificando condición: ${key} >= ${valorRequerido}`);
         
-        // Dividir la clave: "fauna.Mamífero" -> ["fauna", "Mamífero"]
         const [categoria, subcategoria] = key.split(".");
         
-        // Obtener valor actual del historial
-        const valorUsuario = usuario.historial[categoria]?.[subcategoria] || 0;
+        const valorUsuario = usuario.historial?.[categoria]?.[subcategoria] || 0;
         
         console.log(`  📈 Valor usuario: ${valorUsuario}`);
         console.log(`  🎯 Valor requerido: ${valorRequerido}`);
@@ -355,17 +393,16 @@ const ahora = moment().tz("America/Mexico_City").toDate();
     try {
       console.log(`\n🏆 COMPLETANDO RETO...`);
       
-      const usuario = await Usuario.findById(usuarioId);
-      const reto = await Reto.findById(retoId);
+      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+      const reto = await prisma.reto.findUnique({ where: { id: retoId } });
 
       if (!usuario || !reto) {
         console.log("❌ Usuario o reto no encontrado");
         return;
       }
 
-      // Verificar si ya completó
       const yaCompletado = reto.usuarios_finalizados.some(
-        u => u.usuario_id.toString() === usuarioId.toString()
+        u => u.usuario_id === usuarioId
       );
 
       if (yaCompletado) {
@@ -373,39 +410,43 @@ const ahora = moment().tz("America/Mexico_City").toDate();
         return;
       }
 
-      // Calcular posición
       const posicion = reto.usuarios_finalizados.length + 1;
       
-      // Agregar a usuarios finalizados
-      reto.usuarios_finalizados.push({
+      const usuariosFinalizadosUpdated = [...reto.usuarios_finalizados, {
         usuario_id: usuarioId,
         fecha_completado: new Date(),
         posicion: posicion
-      });
+      }];
 
-      await reto.save();
+      await prisma.reto.update({
+        where: { id: retoId },
+        data: {
+          usuarios_finalizados: usuariosFinalizadosUpdated
+        }
+      });
       console.log(`✅ Reto guardado con usuario en posición ${posicion}`);
 
-      // Crear logro
       const descripcionLogro = this.generarDescripcionLogro(posicion, reto.nombre_reto);
       
-      usuario.logros.push({
+      const logrosUpdated = [...usuario.logros, {
         id_reto_base: retoId,
         nombre_logro: reto.nombre_reto,
         descripcion_titulo: descripcionLogro,
         fecha_obtencion: new Date(),
         es_mostrado: true
+      }];
+
+      const retosActivosUpdated = usuario.retos_activos.filter(id => id !== retoId);
+
+      await prisma.usuario.update({
+        where: { id: usuarioId },
+        data: {
+          logros: logrosUpdated,
+          retos_activos: retosActivosUpdated
+        }
       });
-
-      // Remover de retos activos
-      usuario.retos_activos = usuario.retos_activos.filter(
-        id => id.toString() !== retoId.toString()
-      );
-
-      await usuario.save();
       console.log(`✅ Logro agregado al usuario`);
 
-      // Notificar
       await observerService.notify("RETO_COMPLETADO", { usuario, reto });
 
       console.log(`🎉 ${usuario.nombre_usuario} completó: ${reto.nombre_reto} - Posición: ${posicion}`);
@@ -430,36 +471,32 @@ const ahora = moment().tz("America/Mexico_City").toDate();
     try {
       console.log(`\n📝 Actualizando historial: ${tipo} - ${especie}`);
       
-      const usuario = await Usuario.findById(usuarioId);
+      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
       if (!usuario) {
         console.log("❌ Usuario no encontrado");
         return;
       }
 
-      // Asegurarse de que existen las estructuras
-      if (!usuario.historial) {
-        usuario.historial = { fauna: {}, flora: {} };
-      }
-      if (!usuario.historial.fauna) {
-        usuario.historial.fauna = {};
-      }
-      if (!usuario.historial.flora) {
-        usuario.historial.flora = {};
-      }
+      let historial = usuario.historial || { fauna: {}, flora: {} };
+      if (!historial.fauna) historial.fauna = {};
+      if (!historial.flora) historial.flora = {};
 
-      // Actualizar el contador
+      const tipoMin = tipo.toLowerCase(); // 'fauna' o 'flora'
+
       if (tipo === "Fauna") {
-        usuario.historial.fauna[especie] = (usuario.historial.fauna[especie] || 0) + 1;
-        console.log(`✅ Fauna.${especie}: ${usuario.historial.fauna[especie]}`);
+        historial.fauna[especie] = (historial.fauna[especie] || 0) + 1;
+        console.log(`✅ Fauna.${especie}: ${historial.fauna[especie]}`);
       } else if (tipo === "Flora") {
-        usuario.historial.flora[especie] = (usuario.historial.flora[especie] || 0) + 1;
-        console.log(`✅ Flora.${especie}: ${usuario.historial.flora[especie]}`);
+        historial.flora[especie] = (historial.flora[especie] || 0) + 1;
+        console.log(`✅ Flora.${especie}: ${historial.flora[especie]}`);
       }
 
-      await usuario.save();
+      await prisma.usuario.update({
+        where: { id: usuarioId },
+        data: { historial }
+      });
       console.log(`✅ Historial guardado`);
       
-      // VERIFICAR PROGRESO INMEDIATAMENTE
       await this.verificarProgreso(usuarioId);
     } catch (error) {
       console.error("❌ Error actualizando historial:", error);

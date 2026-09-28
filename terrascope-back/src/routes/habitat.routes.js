@@ -6,7 +6,7 @@ import {
   updateHabitat,
   deleteHabitat
 } from "../controllers/habitat.controller.js";
-import { authenticate, requireRoles } from "../middleware/auth.middleware.js";
+import { verificarToken } from "../middlewares/auth.middleware.js";
 
 // Autor: César González
 // Fecha: 2025-10-03
@@ -14,19 +14,73 @@ import { authenticate, requireRoles } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-// Crear un nuevo hábitat
-router.post("/", authenticate, requireRoles("Administrador"), createHabitat);
-
-// Obtener todos los hábitats
+/**
+ * @swagger
+ * /habitats:
+ *   post:
+ *     summary: Crear un nuevo hábitat
+ *     tags: [Hábitats]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Hábitat creado
+ *   get:
+ *     summary: Obtener todos los hábitats
+ *     tags: [Hábitats]
+ *     responses:
+ *       200:
+ *         description: Lista de hábitats
+ */
+router.post("/", verificarToken, createHabitat);
 router.get("/", getAllHabitats);
 
-// Obtener un hábitat por ID
+/**
+ * @swagger
+ * /habitats/{id}:
+ *   get:
+ *     summary: Obtener hábitat por ID
+ *     tags: [Hábitats]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Hábitat encontrado
+ *   put:
+ *     summary: Actualizar hábitat
+ *     tags: [Hábitats]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Hábitat actualizado
+ *   delete:
+ *     summary: Eliminar hábitat
+ *     tags: [Hábitats]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Hábitat eliminado
+ */
 router.get("/:id", getHabitatById);
-
-// Actualizar un hábitat
-router.put("/:id", authenticate, requireRoles("Administrador"), updateHabitat);
-
-// Eliminar un hábitat
-router.delete("/:id", authenticate, requireRoles("Administrador"), deleteHabitat);
+router.put("/:id", verificarToken, updateHabitat);
+router.delete("/:id", verificarToken, deleteHabitat);
 
 export default router;
