@@ -22,6 +22,10 @@ model Usuario {
   retos_activos       String[]     @db.ObjectId
   seguidores          String[]     @db.ObjectId
   seguidos            String[]     @db.ObjectId
+  recibir_alertas_peligro Boolean  @default(true)
+  ultima_ubicacion_lat    Float?
+  ultima_ubicacion_lng    Float?
+  ultima_actualizacion_ubicacion DateTime?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
@@ -103,6 +107,7 @@ model FaunaFlora {
   habitat           FaunaFloraHabitat?
   comentarios       FaunaFloraComentario[]
   likes             String[]     @db.ObjectId
+  es_peligrosa      Boolean      @default(false)
   validacion        Validacion?
 
   // Many-to-many para validadores
@@ -161,4 +166,28 @@ type RetoFinalizado {
   usuario_id       String?   @db.ObjectId
   fecha_completado DateTime? @default(now())
   posicion         Int?
+}
+
+model AlertaPeligro {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  id_avistamiento      String   @db.ObjectId
+  especie              String
+  latitud              Float
+  longitud             Float
+  usuarios_notificados String[] @db.ObjectId
+  createdAt            DateTime @default(now())
+
+  @@map("alertas_peligro")
+}
+
+model AlertaSOS {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  id_usuario String   @db.ObjectId
+  latitud    Float
+  longitud   Float
+  estado     String   @default("pendiente") // "pendiente", "atendida", "falsa_alarma"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("alertas_sos")
 }
