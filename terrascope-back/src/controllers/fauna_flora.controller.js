@@ -28,8 +28,8 @@ export const createAvistamiento = async (req, res) => {
 
     if (!habitat || !habitat.id_habitat) {
       console.log('❌ Habitat no proporcionado o sin ID');
-      return res.status(400).json({ 
-        message: "Habitat es requerido y debe tener un id_habitat" 
+      return res.status(400).json({
+        message: "Habitat es requerido y debe tener un id_habitat"
       });
     }
 
@@ -37,11 +37,11 @@ export const createAvistamiento = async (req, res) => {
     const habitatExiste = await prisma.habitat.findUnique({
       where: { id: habitat.id_habitat }
     });
-    
+
     if (!habitatExiste) {
       console.log('❌ Habitat no encontrado en la base de datos');
-      return res.status(404).json({ 
-        message: "Habitat no encontrado" 
+      return res.status(404).json({
+        message: "Habitat no encontrado"
       });
     }
 
@@ -84,9 +84,8 @@ export const createAvistamiento = async (req, res) => {
         }
       }
     });
-    
+
     console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento.id);
-    
     // Lógica para Alertas de Fauna Peligrosa
     if (nuevoAvistamiento.es_peligrosa) {
       try {
@@ -136,7 +135,6 @@ export const createAvistamiento = async (req, res) => {
         console.error("❌ Error generando alerta de peligro:", alertError);
       }
     }
-    
     try {
       if (nuevoAvistamiento.id_usuario) {
         await retosService.actualizarHistorial(
@@ -156,9 +154,9 @@ export const createAvistamiento = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error completo:', error);
-    res.status(500).json({ 
-      message: "Error al crear un avistamiento", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al crear un avistamiento",
+      error: error.message
     });
   }
 };
@@ -168,10 +166,10 @@ export const getAvistamientos = async (req, res) => {
   try {
     const { especie, categoria, usuarioId, id_usuario } = req.query;
     const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
-    
+
     let filter = {};
     if (especie) filter.especie = especie;
-    if (categoria) filter.especie = categoria; 
+    if (categoria) filter.especie = categoria;
 
     const avistamientos = await prisma.faunaFlora.findMany({
       where: filter,
@@ -195,9 +193,9 @@ export const getAvistamientos = async (req, res) => {
     res.status(200).json(formatted);
   } catch (error) {
     console.error('❌ Error al obtener avistamientos:', error);
-    res.status(500).json({ 
-      message: "Error al conseguir los avistamientos", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al conseguir los avistamientos",
+      error: error.message
     });
   }
 };
@@ -216,7 +214,7 @@ export const getAvistamientoById = async (req, res) => {
         }
       }
     });
-    
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
@@ -229,9 +227,9 @@ export const getAvistamientoById = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al obtener avistamiento:', error);
-    res.status(500).json({ 
-      message: "Error al obtener el avistamiento", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al obtener el avistamiento",
+      error: error.message
     });
   }
 };
@@ -240,7 +238,7 @@ export const getAvistamientoById = async (req, res) => {
 export const addComentario = async (req, res) => {
   try {
     const { comentario } = req.body;
-    
+
     if (!comentario || comentario.trim() === "") {
       return res.status(400).json({ message: "El comentario es requerido" });
     }
@@ -248,7 +246,7 @@ export const addComentario = async (req, res) => {
     const avistamiento = await prisma.faunaFlora.findUnique({
       where: { id: req.params.id }
     });
-    
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
@@ -284,9 +282,9 @@ export const addComentario = async (req, res) => {
         }
       }
     });
-    
+
     const comentarioCreado = updatedAvistamiento.comentarios[updatedAvistamiento.comentarios.length - 1];
-    
+
     res.status(201).json({
       message: "Comentario agregado exitosamente",
       comentario: comentarioCreado,
@@ -296,9 +294,9 @@ export const addComentario = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error al agregar comentario:", error);
-    res.status(500).json({ 
-      message: "Error al agregar comentario", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al agregar comentario",
+      error: error.message
     });
   }
 };
@@ -311,9 +309,9 @@ export const deleteAvistamiento = async (req, res) => {
     res.status(200).json({ message: "Avistamiento eliminado correctamente" });
   } catch (error) {
     console.error('❌ Error al eliminar avistamiento:', error);
-    res.status(500).json({ 
-      message: "Error al eliminar avistamiento", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al eliminar avistamiento",
+      error: error.message
     });
   }
 };
@@ -346,9 +344,9 @@ export const getFrequentZones = async (req, res) => {
     res.status(200).json(frequentZones);
   } catch (error) {
     console.error('❌ Error al obtener zonas frecuentes:', error);
-    res.status(500).json({ 
-      message: "Error al obtener zonas frecuentes", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al obtener zonas frecuentes",
+      error: error.message
     });
   }
 };
@@ -357,7 +355,7 @@ export const getFrequentZones = async (req, res) => {
 export const votarValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const { id_usuario } = req.body;
+    const id_usuario = req.usuario?.id || req.user?.id || req.body?.id_usuario;
 
     if (!id_usuario) {
       return res.status(400).json({ message: "Se requiere el id_usuario" });
@@ -366,16 +364,17 @@ export const votarValidacion = async (req, res) => {
     const avistamiento = await prisma.faunaFlora.findUnique({
       where: { id: avistamientoId }
     });
-    
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
-    if (avistamiento.id_usuario && avistamiento.id_usuario === id_usuario) {
+    if (avistamiento.id_usuario && avistamiento.id_usuario.toString() === id_usuario.toString()) {
       return res.status(403).json({ message: "No puedes votar tu propio avistamiento" });
     }
 
-    if (avistamiento.usuarios_validadores_ids.includes(id_usuario)) {
+    const validadores = avistamiento.usuarios_validadores_ids || [];
+    if (validadores.some(v => v.toString() === id_usuario.toString())) {
       return res.status(400).json({ message: "Este usuario ya validó este avistamiento" });
     }
 
@@ -409,9 +408,9 @@ export const votarValidacion = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error al registrar voto:', error);
-    res.status(500).json({ 
-      message: "Error al registrar el voto", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al registrar el voto",
+      error: error.message
     });
   }
 };
@@ -420,7 +419,8 @@ export const votarValidacion = async (req, res) => {
 export const validarPorExperto = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const { id_usuario, rol } = req.body;
+    const id_usuario = req.usuario?.id || req.user?.id || req.body?.id_usuario;
+    const rol = req.usuario?.rol || req.user?.rol || req.body?.rol;
 
     if (!id_usuario || !rol) {
       return res.status(400).json({ message: "Se requiere id_usuario y rol" });
@@ -433,7 +433,7 @@ export const validarPorExperto = async (req, res) => {
     const avistamiento = await prisma.faunaFlora.findUnique({
       where: { id: avistamientoId }
     });
-    
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
@@ -457,9 +457,9 @@ export const validarPorExperto = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error al validar por experto:', error);
-    res.status(500).json({ 
-      message: "Error al validar por experto", 
-      error: error.message 
+    res.status(500).json({
+      message: "Error al validar por experto",
+      error: error.message
     });
   }
 };
@@ -475,13 +475,13 @@ export const obtenerEstadoValidacion = async (req, res) => {
     const avistamiento = await prisma.faunaFlora.findUnique({
       where: { id: avistamientoId }
     });
-    
+
     if (!avistamiento) {
       return res.status(404).json({ message: "Avistamiento no encontrado" });
     }
 
     const validacion = avistamiento.validacion;
-    const yaVoto = avistamiento.usuarios_validadores_ids?.includes(userId) ?? false;
+    const yaVoto = avistamiento.usuarios_validadores_ids?.some(v => v.toString() === userId.toString()) ?? false;
 
     res.status(200).json({
       estado: validacion?.estado || "pendiente",
@@ -501,13 +501,13 @@ export const obtenerEstadoValidacion = async (req, res) => {
 export const getFeedAvistamientos = async (req, res) => {
   try {
     const currentUserId = req.usuario?.id?.toString() || req.query.usuarioId || req.query.id_usuario;
-    
+
     if (!currentUserId) {
       return res.status(400).json({ message: "Se requiere usuarioId o autenticación para obtener el feed" });
     }
 
     const usuario = await prisma.usuario.findUnique({ where: { id: currentUserId } });
-    
+
     if (!usuario) {
       return res.status(404).json({ message: "Usuario no encontrado" });
     }
@@ -555,7 +555,7 @@ export const toggleLikeAvistamiento = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.usuarioId;
-    
+
     if (!userId) {
       return res.status(400).json({ message: "Se requiere autenticación o id_usuario para dar o quitar like" });
     }
@@ -568,7 +568,7 @@ export const toggleLikeAvistamiento = async (req, res) => {
     const likes = avistamiento.likes || [];
     const yaDioLike = likes.includes(userId);
 
-    const updatedLikes = yaDioLike 
+    const updatedLikes = yaDioLike
       ? likes.filter(likeId => likeId !== userId)
       : [...likes, userId];
 
@@ -594,7 +594,7 @@ export const deleteComentario = async (req, res) => {
   try {
     const { id, comentarioId } = req.params;
     const solicitanteId = req.usuario?.id?.toString() || req.body.id_usuario || req.query.id_usuario;
-    
+
     if (!solicitanteId) {
       return res.status(401).json({ message: "Se requiere autenticación para eliminar un comentario" });
     }
@@ -613,8 +613,8 @@ export const deleteComentario = async (req, res) => {
     const esAdmin = req.usuario?.rol === "Administrador";
 
     if (!esAutor && !esAdmin) {
-      return res.status(403).json({ 
-        message: "No tienes permisos para eliminar este comentario. Solo el autor o un Administrador pueden eliminarlo." 
+      return res.status(403).json({
+        message: "No tienes permisos para eliminar este comentario. Solo el autor o un Administrador pueden eliminarlo."
       });
     }
 

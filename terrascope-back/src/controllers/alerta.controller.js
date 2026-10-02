@@ -93,8 +93,25 @@ export const getDangerousFaunaAlerts = async (req, res) => {
       take: 20 // Últimas 20 alertas
     });
 
+    const estados = await prisma.estadoAlertaUsuario.findMany({
+      where: {
+        id_usuario: userId,
+        id_alerta: { in: alertas.map(({ id }) => id) }
+      }
+    });
+    const estadosPorAlerta = new Map(
+      estados.map(({ id_alerta, mostrada, leida }) => [
+        id_alerta,
+        { mostrada, leida }
+      ])
+    );
+
     res.status(200).json({
-      alertas,
+      alertas: alertas.map((alerta) => ({
+        ...alerta,
+        mostrada: estadosPorAlerta.get(alerta.id)?.mostrada ?? false,
+        leida: estadosPorAlerta.get(alerta.id)?.leida ?? false
+      })),
       total: alertas.length
     });
   } catch (error) {
@@ -102,12 +119,125 @@ export const getDangerousFaunaAlerts = async (req, res) => {
   }
 };
 
+// Registrar la primera presentación de una alerta para evitar banners repetidos.
+export const markDangerousFaunaAlertShown = async (req, res) => {
+  try {
+    const userId = req.usuario?.id;
+    const { alertId } = req.params;
+
+    if (!userId) {
+      return respondWithError(res, 401, "UNAUTHORIZED", "Usuario no autenticado");
+    }
+
+    if (!/^[a-f\d]{24}$/i.test(alertId)) {
+      return respondWithError(res, 400, "INVALID_ALERT_ID", "El identificador de alerta no es válido");
+    }
+
+    const alert = await prisma.alertaPeligro.findUnique({
+      where: { id: alertId }
+    });
+
+    if (!alert || !alert.usuarios_notificados.includes(userId)) {
+      return respondWithError(res, 404, "ALERT_NOT_FOUND", "Alerta no encontrada");
+    }
+
+    const stateId = `${alertId}_${userId}`;
+    const where = { id: stateId };
+    const existingState = await prisma.estadoAlertaUsuario.findUnique({ where });
+
+    if (existingState?.mostrada) {
+      return res.status(200).json({ mostrada: false });
+    }
+
+    if (existingState) {
+      await prisma.estadoAlertaUsuario.update({
+        where,
+        data: { mostrada: true }
+      });
+      return res.status(200).json({ mostrada: true });
+    }
+
+    try {
+      await prisma.estadoAlertaUsuario.create({
+        data: {
+          id: stateId,
+          id_alerta: alertId,
+          id_usuario: userId,
+          mostrada: true
+        }
+      });
+      return res.status(200).json({ mostrada: true });
+    } catch (error) {
+      if (error.code === "P2002") {
+        return res.status(200).json({ mostrada: false });
+      }
+      throw error;
+    }
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al registrar la presentación de la alerta");
+  }
+};
+
+// Registrar que el usuario abrió una alerta desde el centro de notificaciones.
+export const markDangerousFaunaAlertRead = async (req, res) => {
+  try {
+    const userId = req.usuario?.id;
+    const { alertId } = req.params;
+
+    if (!userId) {
+      return respondWithError(res, 401, "UNAUTHORIZED", "Usuario no autenticado");
+    }
+
+    if (!/^[a-f\d]{24}$/i.test(alertId)) {
+      return respondWithError(res, 400, "INVALID_ALERT_ID", "El identificador de alerta no es válido");
+    }
+
+    const alert = await prisma.alertaPeligro.findUnique({
+      where: { id: alertId }
+    });
+
+    if (!alert || !alert.usuarios_notificados.includes(userId)) {
+      return respondWithError(res, 404, "ALERT_NOT_FOUND", "Alerta no encontrada");
+    }
+
+    await prisma.estadoAlertaUsuario.upsert({
+      where: { id: `${alertId}_${userId}` },
+      create: {
+        id: `${alertId}_${userId}`,
+        id_alerta: alertId,
+        id_usuario: userId,
+        mostrada: true,
+        leida: true
+      },
+      update: { leida: true }
+    });
+
+    res.status(200).json({ leida: true });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al marcar la alerta como leída");
+  }
+};
+
 // Obtener avistamientos peligrosos recientes cercanos (para cuando el usuario abre la app/mapa)
 export const getNearbyDangerousAlerts = async (req, res) => {
   try {
     const { latitud, longitud } = req.query;
-    
-    if (!latitud || !longitud) {
+    const userId = req.usuario?.id;
+    const latitude = Number(latitud);
+    const longitude = Number(longitud);
+
+    if (!userId) {
+      return respondWithError(res, 401, "UNAUTHORIZED", "Usuario no autenticado");
+    }
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
       return respondWithError(res, 400, "MISSING_LOCATION", "Se requieren latitud y longitud");
     }
 
@@ -127,15 +257,50 @@ export const getNearbyDangerousAlerts = async (req, res) => {
     const radioKm = 10;
     const cercanos = peligrososRecientes.filter(avistamiento => {
       const distance = calculateDistance(
-        parseFloat(latitud), parseFloat(longitud),
+        latitude, longitude,
         avistamiento.ubicacion.latitud, avistamiento.ubicacion.longitud
       );
       return distance <= radioKm;
     });
 
+    const alertas = [];
+    for (const avistamiento of cercanos) {
+      let alerta = await prisma.alertaPeligro.findFirst({
+        where: {
+          id_avistamiento: avistamiento.id,
+          usuarios_notificados: { has: userId }
+        }
+      });
+
+      if (!alerta) {
+        const existingAlert = await prisma.alertaPeligro.findFirst({
+          where: { id_avistamiento: avistamiento.id }
+        });
+
+        if (existingAlert) {
+          alerta = await prisma.alertaPeligro.update({
+            where: { id: existingAlert.id },
+            data: { usuarios_notificados: { push: userId } }
+          });
+        } else {
+          alerta = await prisma.alertaPeligro.create({
+            data: {
+              id_avistamiento: avistamiento.id,
+              especie: avistamiento.especie,
+              latitud: avistamiento.ubicacion.latitud,
+              longitud: avistamiento.ubicacion.longitud,
+              usuarios_notificados: [userId]
+            }
+          });
+        }
+      }
+
+      alertas.push(alerta);
+    }
+
     res.status(200).json({
-      alertas: cercanos,
-      total: cercanos.length
+      alertas,
+      total: alertas.length
     });
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener alertas cercanas");

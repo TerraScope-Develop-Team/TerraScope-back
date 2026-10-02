@@ -3,6 +3,8 @@ import {
   registerSOS,
   getSOSAlerts,
   getDangerousFaunaAlerts,
+  markDangerousFaunaAlertShown,
+  markDangerousFaunaAlertRead,
   getNearbyDangerousAlerts,
   updateAlertSettings,
   updateLocation
@@ -17,7 +19,9 @@ router.get("/sos", verificarToken, getSOSAlerts); // Idealmente protegido por re
 
 // Alertas de peligro
 router.get("/peligro", verificarToken, getDangerousFaunaAlerts);
-router.get("/peligro/cercanos", getNearbyDangerousAlerts);
+router.patch("/peligro/:alertId/mostrada", verificarToken, markDangerousFaunaAlertShown);
+router.patch("/peligro/:alertId/leida", verificarToken, markDangerousFaunaAlertRead);
+router.get("/peligro/cercanos", verificarToken, getNearbyDangerousAlerts);
 
 // Configuración y ubicación del usuario para alertas
 router.patch("/configuracion", verificarToken, updateAlertSettings);

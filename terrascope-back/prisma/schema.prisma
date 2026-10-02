@@ -180,6 +180,17 @@ model AlertaPeligro {
   @@map("alertas_peligro")
 }
 
+model EstadoAlertaUsuario {
+  id         String   @id @map("_id")
+  id_alerta  String   @db.ObjectId
+  id_usuario String   @db.ObjectId
+  mostrada   Boolean  @default(false)
+  leida      Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+
+  @@map("estados_alerta_usuario")
+}
+
 model AlertaSOS {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   id_usuario String   @db.ObjectId
