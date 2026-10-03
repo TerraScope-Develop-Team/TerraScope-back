@@ -1,4 +1,5 @@
 import prisma from "../config/db.js";
+import { parsePagination, paginateResults } from "../utils/pagination.js";
 
 // Autor: César González
 // Fecha: 2025-10-03
@@ -40,7 +41,17 @@ export const createHabitat = async (req, res) => {
 // Obtener todos los hábitats
 export const getAllHabitats = async (req, res) => {
   try {
-    const habitats = await prisma.habitat.findMany();
+    const pagination = parsePagination(req.query, 100);
+    if (!pagination.validCursor) {
+      return res.status(400).json({ message: "El cursor debe ser un ObjectId válido" });
+    }
+
+    const records = await prisma.habitat.findMany({
+      where: pagination.cursor ? { id: { lt: pagination.cursor } } : undefined,
+      orderBy: { id: "desc" },
+      take: pagination.limit + 1,
+    });
+    const { items: habitats, hasMore, nextCursor } = paginateResults(res, records, pagination.limit);
     
     // 📋 Debug: Ver qué estás enviando
     console.log('📤 Total de hábitats encontrados:', habitats.length);
@@ -51,7 +62,8 @@ export const getAllHabitats = async (req, res) => {
     
     res.json({
       message: "Hábitats obtenidos exitosamente",
-      habitats
+      habitats,
+      pagination: { limit: pagination.limit, has_more: hasMore, next_cursor: nextCursor }
     });
   } catch (error) {
     console.error("❌ Error obteniendo hábitats:", error);
