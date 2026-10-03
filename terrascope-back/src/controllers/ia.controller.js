@@ -34,23 +34,25 @@ export const identificarEspecie = async (req, res) => {
     let imagenOptimizada = imagen;
     let originalBytes = 0;
     let optimizedBytes = 0;
+    let mimeType = "image/jpeg";
 
-    try {
-      const optimized = await optimizeImage(imagen);
-      imagenOptimizada = optimized.base64Output;
-      originalBytes = optimized.originalBytes;
-      optimizedBytes = optimized.optimizedBytes;
+    const optimized = await optimizeImage(imagen);
+    imagenOptimizada = optimized.base64Output;
+    originalBytes = optimized.originalBytes;
+    optimizedBytes = optimized.optimizedBytes;
+    mimeType = optimized.mimeType;
 
+    if (optimized.wasOptimized) {
       const reduccion = (((originalBytes - optimizedBytes) / originalBytes) * 100).toFixed(1);
       console.log(
         `[IA] Imagen optimizada: ${originalBytes} bytes → ${optimizedBytes} bytes (reduccion: ${reduccion}%)`
       );
-    } catch (optErr) {
-      console.warn("[IA] No se pudo optimizar la imagen, se enviará en formato original:", optErr.message);
+    } else {
+      console.warn("[IA] No se pudo optimizar la imagen; se enviará en su formato original.");
     }
 
     // 4. Llamar a Gemini con la imagen optimizada
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     const prompt = `
 Eres un experto en biología y taxonomía. Analiza la imagen y determina la especie del ser vivo que aparece.
 Devuelve únicamente un JSON válido con este formato:
@@ -64,7 +66,7 @@ Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
 
     const result = await model.generateContent([
       prompt,
-      { inlineData: { mimeType: "image/jpeg", data: imagenOptimizada } }
+      { inlineData: { mimeType, data: imagenOptimizada } }
     ]);
 
     let parsed;
@@ -118,7 +120,7 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       );
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     const prompt = `
 Eres un experto en biología y validación de datos ecológicos.
 Analiza si estos datos son coherentes y realistas:

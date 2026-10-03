@@ -13,15 +13,14 @@ const metrics = {
 };
 
 /**
- * Genera un hash SHA-256 de los primeros 512 bytes del base64 de la imagen.
- * Suficiente para distinguir imágenes sin procesar la cadena completa.
+ * Genera un hash SHA-256 del contenido completo de la imagen.
  *
  * @param {string} base64 - Imagen en base64
  * @returns {string} Hash hexadecimal
  */
 export function hashImage(base64) {
-  const sample = base64.slice(0, 512);
-  return crypto.createHash("sha256").update(sample).digest("hex");
+  const imageBuffer = Buffer.from(base64, "base64");
+  return crypto.createHash("sha256").update(imageBuffer).digest("hex");
 }
 
 /**

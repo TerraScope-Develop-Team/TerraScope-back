@@ -278,7 +278,7 @@ export const quitarTituloActivo = async (req, res) => {
 export const seguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
@@ -327,7 +327,7 @@ export const seguirUsuario = async (req, res) => {
 export const dejarDeSeguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
