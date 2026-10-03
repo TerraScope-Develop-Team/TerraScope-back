@@ -1,5 +1,5 @@
 import express from "express";
-import { identificarEspecie, validarRegistroFaunaFlora } from "../controllers/ia.controller.js";
+import { identificarEspecie, validarRegistroFaunaFlora, getIaStats } from "../controllers/ia.controller.js";
 import { verificarToken } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
@@ -31,5 +31,20 @@ router.post("/identificar", verificarToken, identificarEspecie);
  *         description: Registro validado.
  */
 router.post("/validar-registro", verificarToken, validarRegistroFaunaFlora);
+
+/**
+ * @swagger
+ * /ia/stats:
+ *   get:
+ *     summary: Obtener métricas del caché de identificación de imágenes
+ *     description: Devuelve contadores de solicitudes totales, hits y misses del caché, tasa de hit y número de entradas activas.
+ *     tags: [IA]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Estadísticas del caché de IA.
+ */
+router.get("/stats", verificarToken, getIaStats);
 
 export default router;

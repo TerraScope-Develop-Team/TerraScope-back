@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
+import { optimizeImage } from "../utils/image-optimizer.js";
+import { hashImage, getFromCache, setInCache, getCacheStats } from "../services/ia-cache.service.js";
 
 dotenv.config();
 
@@ -18,7 +20,39 @@ export const identificarEspecie = async (req, res) => {
       return respondWithError(res, 400, "IMAGE_REQUIRED", "No se recibió ninguna imagen en base64");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // 1. Calcular hash de la imagen original para caché
+    const hash = hashImage(imagen);
+
+    // 2. Consultar caché antes de llamar a Gemini
+    const cached = getFromCache(hash);
+    if (cached) {
+      console.log(`[IA] Respuesta desde caché para hash ${hash.slice(0, 8)}...`);
+      return res.status(200).json({ ...cached, cache_hit: true });
+    }
+
+    // 3. Optimizar imagen: comprimir y redimensionar
+    let imagenOptimizada = imagen;
+    let originalBytes = 0;
+    let optimizedBytes = 0;
+    let mimeType = "image/jpeg";
+
+    const optimized = await optimizeImage(imagen);
+    imagenOptimizada = optimized.base64Output;
+    originalBytes = optimized.originalBytes;
+    optimizedBytes = optimized.optimizedBytes;
+    mimeType = optimized.mimeType;
+
+    if (optimized.wasOptimized) {
+      const reduccion = (((originalBytes - optimizedBytes) / originalBytes) * 100).toFixed(1);
+      console.log(
+        `[IA] Imagen optimizada: ${originalBytes} bytes → ${optimizedBytes} bytes (reduccion: ${reduccion}%)`
+      );
+    } else {
+      console.warn("[IA] No se pudo optimizar la imagen; se enviará en su formato original.");
+    }
+
+    // 4. Llamar a Gemini con la imagen optimizada
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     const prompt = `
 Eres un experto en biología y taxonomía. Analiza la imagen y determina la especie del ser vivo que aparece.
 Devuelve únicamente un JSON válido con este formato:
@@ -32,7 +66,7 @@ Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
 
     const result = await model.generateContent([
       prompt,
-      { inlineData: { mimeType: "image/jpeg", data: imagen } }
+      { inlineData: { mimeType, data: imagenOptimizada } }
     ]);
 
     let parsed;
@@ -47,7 +81,17 @@ Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
       };
     }
 
-    return res.status(200).json(parsed);
+    // 5. Guardar resultado en caché
+    setInCache(hash, parsed);
+
+    return res.status(200).json({
+      ...parsed,
+      cache_hit: false,
+      _meta: {
+        original_bytes: originalBytes,
+        optimized_bytes: optimizedBytes,
+      }
+    });
   } catch (error) {
     console.error("Error IA:", error);
     return respondWithControllerError(res, error, "El servicio de identificación no está disponible", 503);
@@ -76,7 +120,7 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       );
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     const prompt = `
 Eres un experto en biología y validación de datos ecológicos.
 Analiza si estos datos son coherentes y realistas:
@@ -115,5 +159,21 @@ Devuelve únicamente un JSON válido:
   } catch (error) {
     console.error("Error en validación IA:", error);
     return respondWithControllerError(res, error, "El servicio de validación no está disponible", 503);
+  }
+};
+
+/**
+ * GET /api/ia/stats
+ * Devuelve métricas del caché de identificación de imágenes.
+ */
+export const getIaStats = async (req, res) => {
+  try {
+    const stats = getCacheStats();
+    return res.status(200).json({
+      message: "Estadísticas del servicio de IA",
+      stats,
+    });
+  } catch (error) {
+    return respondWithControllerError(res, error, "Error al obtener estadísticas de IA");
   }
 };
