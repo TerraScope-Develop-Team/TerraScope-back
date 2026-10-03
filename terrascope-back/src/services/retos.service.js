@@ -3,6 +3,7 @@ import observerService from "./observer.service.js";
 import cron from "node-cron";
 import moment from "moment-timezone";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateGeminiContent } from "./gemini-request.service.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -47,7 +48,7 @@ Devuelve únicamente un JSON válido:
 `;
 
 
-    const res = await model.generateContent([prompt]);
+    const res = await generateGeminiContent(model, [prompt]);
     const raw = res.response.text().trim();
 
     const clean = raw

@@ -31,7 +31,7 @@ model Usuario {
   FaunaFloraValidadores FaunaFlora[]           @relation("Validadores", fields: [faunaFloraValidadoresIds], references: [id])
   RetosInscritos        Reto[]                 @relation("RetosUsuariosInscritos", fields: [retos_activos], references: [id])
   RetosFinalizados      RetoFinalizado[]
-  
+
   @@map("usuarios")
 }
 
@@ -109,6 +109,8 @@ model FaunaFlora {
   usuarios_validadores_ids String[]  @db.ObjectId
   usuarios_validadores     Usuario[] @relation("Validadores", fields: [usuarios_validadores_ids], references: [id])
 
+  @@index([especie])
+  @@index([id_usuario, id])
   @@map("fauna_flora")
 }
 
