@@ -18,7 +18,7 @@ export const verificarToken = async (req, res, next) => {
       const usuarioEncontrado = await prisma.usuario.findUnique({
         where: { id: decoded.id }
       });
-      
+
       if (!usuarioEncontrado) {
         return res.status(401).json({ message: "Usuario no encontrado, token inválido" });
       }
@@ -26,6 +26,7 @@ export const verificarToken = async (req, res, next) => {
       // Eliminar la contraseña del objeto
       const { contrasenia_usuario, ...usuarioSinPass } = usuarioEncontrado;
       req.usuario = usuarioSinPass;
+      req.user = usuarioSinPass;
 
       next();
     } catch (error) {

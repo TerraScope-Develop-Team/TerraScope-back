@@ -139,12 +139,12 @@ export const obtenerUsuarioPorId = async (req, res) => {
         updatedAt: true
       }
     });
-    
+
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    const currentUserId = req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
+    const currentUserId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
     const is_following = currentUserId && usuario.seguidores
       ? usuario.seguidores.includes(currentUserId.toString())
       : false;
@@ -170,7 +170,7 @@ export const actualizarUsuario = async (req, res) => {
     if (imagen_perfil !== undefined && imagen_perfil !== null) {
       updateData.imagen_perfil = imagen_perfil;
     }
-    
+
     if (contrasenia_usuario) {
       const salt = await bcrypt.genSalt(10);
       updateData.contrasenia_usuario = await bcrypt.hash(contrasenia_usuario, salt);
@@ -222,7 +222,7 @@ export const seleccionarTituloActivo = async (req, res) => {
     const usuario = await prisma.usuario.findUnique({
       where: { id: usuarioId }
     });
-    
+
     if (!usuario) {
       return res.status(404).json({ mensaje: "Usuario no encontrado" });
     }
@@ -278,7 +278,7 @@ export const quitarTituloActivo = async (req, res) => {
 export const seguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
@@ -327,7 +327,7 @@ export const seguirUsuario = async (req, res) => {
 export const dejarDeSeguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.usuario?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
@@ -369,7 +369,7 @@ export const dejarDeSeguirUsuario = async (req, res) => {
 export const obtenerSeguidores = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const usuario = await prisma.usuario.findUnique({
       where: { id },
       select: { seguidores: true }
@@ -397,7 +397,7 @@ export const obtenerSeguidores = async (req, res) => {
 export const obtenerSeguidos = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const usuario = await prisma.usuario.findUnique({
       where: { id },
       select: { seguidos: true }
