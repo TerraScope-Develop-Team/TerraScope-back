@@ -58,7 +58,7 @@ router.get("/frequent-zones", getFrequentZones);
  *       - bearerAuth: []
  *     responses:
  *       201:
- *         description: Avistamiento creado
+ *         description: Avistamiento creado; evalúa notificaciones para cada dispositivo a 2 km o menos
  *   get:
  *     summary: Obtener todos los avistamientos
  *     tags: [Fauna y Flora]
@@ -205,7 +205,7 @@ router.delete("/:id/comentarios/:comentarioId", verificarToken, deleteComentario
  *         required: true
  *     responses:
  *       200:
- *         description: Like alternado
+ *         description: Like alternado; indica si FCM aceptó el envío en la propiedad push
  */
 router.post("/:id/like", verificarToken, toggleLikeAvistamiento);
 router.put("/:id/like", verificarToken, toggleLikeAvistamiento); // Alias flexible
