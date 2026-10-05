@@ -83,13 +83,12 @@ class RetosService {
   }
 
   inicializarCron() {
-    // Ejecutar cada semana (Lunes a las 00:00)
-    cron.schedule("0 0 * * 1", async () => {
-      console.log("🔄 Generando nuevos retos dinámicos semanales...");
+    cron.schedule("*/1 * * * *", async () => {
+      console.log("🔄 Generando nuevos retos dinámicos (prueba cada minuto)...");
       await this.generarRetosAutomaticos();
     });
 
-    console.log("✅ Cron job para retos configurado (cada semana)");
+    console.log("✅ Cron job para retos configurado (cada minuto, modo de prueba)");
   }
 
 
@@ -171,7 +170,7 @@ class RetosService {
 
           // Hora local de México
           const ahora = moment().tz("America/Mexico_City").toDate();
-          const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
+          const fechaFinal = moment(ahora).add(7, "days").toDate();
 
           const condicionKey = tipo === "Fauna" ? `fauna` : `flora`;
           const condiciones = { [condicionKey]: { [especie]: cantidad } };
@@ -240,7 +239,7 @@ class RetosService {
         }
 
         const ahora = moment().tz("America/Mexico_City").toDate();
-        const fechaFinal = moment(ahora).add(3, "minutes").toDate(); // Cierre 3 minutos después
+        const fechaFinal = moment(ahora).add(7, "days").toDate();
 
         const condicionKey = tipo === "Fauna" ? `fauna` : `flora`;
         const ia = await generarNombreDescripcionYCantidadIA(tipo, especie);
