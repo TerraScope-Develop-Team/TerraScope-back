@@ -483,12 +483,15 @@ class RetosService {
 
       const tipoMin = tipo.toLowerCase(); // 'fauna' o 'flora'
 
+      // Normalizar especie para que coincida con el esquema Prisma (quitar acentos)
+      const key = especie.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
       if (tipo === "Fauna") {
-        historial.fauna[especie] = (historial.fauna[especie] || 0) + 1;
-        console.log(`✅ Fauna.${especie}: ${historial.fauna[especie]}`);
+        historial.fauna[key] = (historial.fauna[key] || 0) + 1;
+        console.log(`✅ Fauna.${key}: ${historial.fauna[key]}`);
       } else if (tipo === "Flora") {
-        historial.flora[especie] = (historial.flora[especie] || 0) + 1;
-        console.log(`✅ Flora.${especie}: ${historial.flora[especie]}`);
+        historial.flora[key] = (historial.flora[key] || 0) + 1;
+        console.log(`✅ Flora.${key}: ${historial.flora[key]}`);
       }
 
       await prisma.usuario.update({

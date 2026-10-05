@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
+import { calculateDistance } from "./alerta.controller.js";
 import { parsePagination, paginateResults } from "../utils/pagination.js";
 
 const FREQUENT_ZONES_CACHE_TTL_MS = 30_000;
@@ -27,7 +28,8 @@ export const createAvistamiento = async (req, res) => {
       tipo,
       nombre_usuario,
       id_usuario,
-      validacion
+      validacion,
+      es_peligrosa
     } = req.body;
 
     if (!habitat || !habitat.id_habitat) {
@@ -77,6 +79,7 @@ export const createAvistamiento = async (req, res) => {
         tipo,
         nombre_usuario,
         id_usuario: id_usuario || null,
+        es_peligrosa: es_peligrosa || false,
         validacion: {
           set: {
             estado: validacion?.estado || "pendiente",
@@ -89,7 +92,55 @@ export const createAvistamiento = async (req, res) => {
     });
 
     console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento.id);
+    // Lógica para Alertas de Fauna Peligrosa
+    if (nuevoAvistamiento.es_peligrosa) {
+      try {
+        const radiusKm = 10; // Radio de alerta en km
+        const usersToAlert = await prisma.usuario.findMany({
+          where: {
+            recibir_alertas_peligro: true,
+            ultima_ubicacion_lat: { not: null },
+            ultima_ubicacion_lng: { not: null }
+          }
+        });
+        
+        const notifiedUserIds = [];
+        for (const user of usersToAlert) {
+          if (user.id === nuevoAvistamiento.id_usuario) continue; // No notificar al que reporta
 
+          const distance = calculateDistance(
+            ubicacion.latitud, ubicacion.longitud,
+            user.ultima_ubicacion_lat, user.ultima_ubicacion_lng
+          );
+          if (distance <= radiusKm) {
+            notifiedUserIds.push(user.id);
+          }
+        }
+
+        if (notifiedUserIds.length > 0) {
+          const alerta = await prisma.alertaPeligro.create({
+            data: {
+              id_avistamiento: nuevoAvistamiento.id,
+              especie: nuevoAvistamiento.especie,
+              latitud: ubicacion.latitud,
+              longitud: ubicacion.longitud,
+              usuarios_notificados: notifiedUserIds
+            }
+          });
+          console.log(`⚠️ Alerta de peligro generada para ${notifiedUserIds.length} usuarios.`);
+          
+          // Emitir a los usuarios usando socket.io
+          const io = req.app.get("io");
+          if (io) {
+            notifiedUserIds.forEach(uid => {
+              io.to(uid).emit("nuevaAlertaPeligro", alerta);
+            });
+          }
+        }
+      } catch (alertError) {
+        console.error("❌ Error generando alerta de peligro:", alertError);
+      }
+    }
     const notificacionesCercanas =
       await pushService.notificarAvistamientoCercano(nuevoAvistamiento);
 
