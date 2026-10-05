@@ -22,6 +22,10 @@ model Usuario {
   retos_activos       String[]     @db.ObjectId
   seguidores          String[]     @db.ObjectId
   seguidos            String[]     @db.ObjectId
+  recibir_alertas_peligro Boolean  @default(true)
+  ultima_ubicacion_lat    Float?
+  ultima_ubicacion_lng    Float?
+  ultima_actualizacion_ubicacion DateTime?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
@@ -31,6 +35,9 @@ model Usuario {
   FaunaFloraValidadores FaunaFlora[]           @relation("Validadores", fields: [faunaFloraValidadoresIds], references: [id])
   RetosInscritos        Reto[]                 @relation("RetosUsuariosInscritos", fields: [retos_activos], references: [id])
   RetosFinalizados      RetoFinalizado[]
+
+  dispositivos_push     DispositivoPush[]
+  preferencias_push     PreferenciasPush?
   
   @@map("usuarios")
 }
@@ -103,12 +110,15 @@ model FaunaFlora {
   habitat           FaunaFloraHabitat?
   comentarios       FaunaFloraComentario[]
   likes             String[]     @db.ObjectId
+  es_peligrosa      Boolean      @default(false)
   validacion        Validacion?
 
   // Many-to-many para validadores
   usuarios_validadores_ids String[]  @db.ObjectId
   usuarios_validadores     Usuario[] @relation("Validadores", fields: [usuarios_validadores_ids], references: [id])
 
+  @@index([especie])
+  @@index([id_usuario, id])
   @@map("fauna_flora")
 }
 
@@ -139,6 +149,51 @@ type Validacion {
   validado_por_experto Boolean  @default(false)
 }
 
+model DispositivoPush {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  token                 String   @unique
+  plataforma            String?
+  latitud               Float?
+  longitud              Float?
+  precision_ubicacion_m Float?
+  ubicacion_actualizada DateTime?
+  usuario_id            String   @db.ObjectId
+  usuario               Usuario  @relation(fields: [usuario_id], references: [id])
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([usuario_id])
+  @@map("dispositivos_push")
+}
+
+model PreferenciasPush {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+  usuario_id              String   @unique @db.ObjectId
+  usuario                 Usuario  @relation(fields: [usuario_id], references: [id])
+  avistamientos_cercanos  Boolean  @default(true)
+  retos_por_vencer        Boolean  @default(true)
+  actividad_avistamientos Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("preferencias_push")
+}
+
+model EntregaNotificacion {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  clave_unica    String    @unique
+  usuario_id     String    @db.ObjectId
+  tipo           String
+  destino_id     String
+  estado         String    @default("pendiente")
+  enviado_en     DateTime?
+  error          String?
+  createdAt      DateTime  @default(now())
+
+  @@index([usuario_id, tipo])
+  @@map("entregas_notificacion")
+}
+
 model Reto {
   id                   String             @id @default(auto()) @map("_id") @db.ObjectId
   nombre_reto          String
@@ -161,4 +216,39 @@ type RetoFinalizado {
   usuario_id       String?   @db.ObjectId
   fecha_completado DateTime? @default(now())
   posicion         Int?
+}
+
+model AlertaPeligro {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  id_avistamiento      String   @db.ObjectId
+  especie              String
+  latitud              Float
+  longitud             Float
+  usuarios_notificados String[] @db.ObjectId
+  createdAt            DateTime @default(now())
+
+  @@map("alertas_peligro")
+}
+
+model EstadoAlertaUsuario {
+  id         String   @id @map("_id")
+  id_alerta  String   @db.ObjectId
+  id_usuario String   @db.ObjectId
+  mostrada   Boolean  @default(false)
+  leida      Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+
+  @@map("estados_alerta_usuario")
+}
+
+model AlertaSOS {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  id_usuario String   @db.ObjectId
+  latitud    Float
+  longitud   Float
+  estado     String   @default("pendiente") // "pendiente", "atendida", "falsa_alarma"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("alertas_sos")
 }

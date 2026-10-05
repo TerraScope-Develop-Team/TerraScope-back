@@ -9,7 +9,10 @@ import floraFaunaRoutes from "./routes/Fauna_Flora.routes.js";
 import usuarioRoutes from "./routes/usuario.routes.js";
 import iaRoutes from "./routes/ia.routes.js";
 import retosRoutes from "./routes/retos.routes.js";
+import alertaRoutes from "./routes/alerta.routes.js";
+import notificacionRoutes from "./routes/notificacion.routes.js";
 import retosService from "./services/retos.service.js";
+import { iniciarProgramadorNotificaciones } from "./services/notification-scheduler.service.js";
 
 import { setupSwagger } from "./config/swagger.js";
 
@@ -31,6 +34,10 @@ app.use("/api/usuarios", usuarioRoutes);
 app.use("/api/fauna-flora", floraFaunaRoutes);
 app.use("/api/ia", iaRoutes);
 app.use("/api/retos", retosRoutes);
+app.use("/api/alertas", alertaRoutes);
+app.use("/api/notificaciones", notificacionRoutes);
+
+iniciarProgramadorNotificaciones();
 
 // Manejo de errores
 app.use((err, req, res, next) => {

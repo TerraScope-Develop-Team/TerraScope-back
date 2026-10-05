@@ -1,4 +1,5 @@
 import prisma from "../config/db.js";
+import { parsePagination, paginateResults } from "../utils/pagination.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { respondWithError, respondWithControllerError } from "../utils/controller-error.js";
@@ -90,7 +91,15 @@ export const crearUsuario = async (req, res) => {
 // Obtener todos los usuarios
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const usuarios = await prisma.usuario.findMany({
+    const pagination = parsePagination(req.query, 100);
+    if (!pagination.validCursor) {
+      return res.status(400).json({ message: "El cursor debe ser un ObjectId válido" });
+    }
+
+    const records = await prisma.usuario.findMany({
+      where: pagination.cursor ? { id: { lt: pagination.cursor } } : undefined,
+      orderBy: { id: "desc" },
+      take: pagination.limit + 1,
       select: {
         id: true,
         nombre_usuario: true,
@@ -107,6 +116,7 @@ export const obtenerUsuarios = async (req, res) => {
         updatedAt: true
       }
     });
+    const { items: usuarios } = paginateResults(res, records, pagination.limit);
     res.status(200).json(usuarios);
   } catch (error) {
     res.status(500).json({
@@ -139,12 +149,12 @@ export const obtenerUsuarioPorId = async (req, res) => {
         updatedAt: true
       }
     });
-    
+
     if (!usuario) {
       return respondWithError(res, 404, "USER_NOT_FOUND", "Usuario no encontrado");
     }
 
-    const currentUserId = req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
+    const currentUserId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
     const is_following = currentUserId && usuario.seguidores
       ? usuario.seguidores.includes(currentUserId.toString())
       : false;
@@ -170,7 +180,7 @@ export const actualizarUsuario = async (req, res) => {
     if (imagen_perfil !== undefined && imagen_perfil !== null) {
       updateData.imagen_perfil = imagen_perfil;
     }
-    
+
     if (contrasenia_usuario) {
       const salt = await bcrypt.genSalt(10);
       updateData.contrasenia_usuario = await bcrypt.hash(contrasenia_usuario, salt);
@@ -222,7 +232,7 @@ export const seleccionarTituloActivo = async (req, res) => {
     const usuario = await prisma.usuario.findUnique({
       where: { id: usuarioId }
     });
-    
+
     if (!usuario) {
       return res.status(404).json({ mensaje: "Usuario no encontrado" });
     }
@@ -278,7 +288,7 @@ export const quitarTituloActivo = async (req, res) => {
 export const seguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
@@ -327,7 +337,7 @@ export const seguirUsuario = async (req, res) => {
 export const dejarDeSeguirUsuario = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const followerId = req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
+    const followerId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.body.id_usuario || req.body.seguidorId;
 
     if (!followerId) {
       return respondWithError(res, 400, "FOLLOWER_ID_REQUIRED", "Se requiere identificación del seguidor");
@@ -369,7 +379,7 @@ export const dejarDeSeguirUsuario = async (req, res) => {
 export const obtenerSeguidores = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const usuario = await prisma.usuario.findUnique({
       where: { id },
       select: { seguidores: true }
@@ -397,7 +407,7 @@ export const obtenerSeguidores = async (req, res) => {
 export const obtenerSeguidos = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const usuario = await prisma.usuario.findUnique({
       where: { id },
       select: { seguidos: true }

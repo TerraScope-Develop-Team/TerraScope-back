@@ -1,6 +1,9 @@
 import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
 
+const isValidObjectId = (id) =>
+  typeof id === "string" && /^[a-f\d]{24}$/i.test(id);
+
 export const obtenerRetosActivos = async (req, res) => {
   try {
     const retos = await prisma.reto.findMany({
@@ -40,10 +43,14 @@ export const obtenerRetoById = async (req, res) => {
 
 export const inscribirseReto = async (req, res) => {
   try {
-    const { retoId, usuarioId } = req.body;
-    
-    if (!usuarioId) {
-      return res.status(400).json({ message: "Se requiere el ID del usuario" });
+    const { retoId } = req.body || {};
+    const usuarioId = req.usuario?.id?.toString();
+
+    if (!isValidObjectId(retoId)) {
+      return res.status(400).json({ message: "Se requiere un ID de reto válido" });
+    }
+    if (!usuarioId || !isValidObjectId(usuarioId)) {
+      return res.status(401).json({ message: "No se pudo identificar al usuario autenticado" });
     }
 
     const reto = await prisma.reto.findUnique({ where: { id: retoId } });
@@ -58,31 +65,54 @@ export const inscribirseReto = async (req, res) => {
     }
 
     const yaInscrito = reto.usuarios_inscritos.includes(usuarioId);
-    if (yaInscrito) {
-      return res.status(400).json({ message: "Ya estás inscrito en este reto" });
+    let retoActualizado = reto;
+    if (!yaInscrito) {
+      retoActualizado = await prisma.reto.update({
+        where: { id: retoId },
+        data: {
+          usuarios_inscritos: {
+            push: usuarioId
+          }
+        }
+      });
     }
 
-    const retoActualizado = await prisma.reto.update({
-      where: { id: retoId },
-      data: {
-        usuarios_inscritos: {
-          push: usuarioId
+    if (!usuario.retos_activos.includes(retoId)) {
+      await prisma.usuario.update({
+        where: { id: usuarioId },
+        data: {
+          retos_activos: {
+            push: retoId
+          }
         }
-      }
-    });
+      });
+    }
 
-    const usuarioActualizado = await prisma.usuario.update({
-      where: { id: usuarioId },
-      data: {
-        retos_activos: {
-          push: retoId
-        }
-      }
-    });
+    const [retoPersistido, usuarioPersistido] = await Promise.all([
+      prisma.reto.findUnique({
+        where: { id: retoId },
+        select: { id: true, usuarios_inscritos: true }
+      }),
+      prisma.usuario.findUnique({
+        where: { id: usuarioId },
+        select: { id: true, retos_activos: true }
+      })
+    ]);
+
+    if (
+      !retoPersistido?.usuarios_inscritos.includes(usuarioId) ||
+      !usuarioPersistido?.retos_activos.includes(retoId)
+    ) {
+      throw new Error("La inscripción no quedó persistida en el reto y el usuario");
+    }
 
     res.status(200).json({
-      message: "Inscripción exitosa",
-      reto: retoActualizado
+      message: yaInscrito ? "Ya estabas inscrito en el reto" : "Inscripción exitosa",
+      reto: {
+        ...retoActualizado,
+        usuarios_inscritos: retoPersistido.usuarios_inscritos
+      },
+      usuarioId
     });
   } catch (error) {
     console.error("❌ Error inscribiendo en reto:", error);
@@ -95,7 +125,14 @@ export const inscribirseReto = async (req, res) => {
 
 export const desinscribirseReto = async (req, res) => {
   try {
-    const { retoId, usuarioId } = req.body;
+    const { retoId, usuarioId } = req.body || {};
+
+    if (!isValidObjectId(retoId)) {
+      return res.status(400).json({ message: "Se requiere un ID de reto válido" });
+    }
+    if (!isValidObjectId(usuarioId)) {
+      return res.status(400).json({ message: "Se requiere un ID de usuario válido" });
+    }
 
     const reto = await prisma.reto.findUnique({ where: { id: retoId } });
     const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
@@ -299,17 +336,19 @@ export const crearRetoManual = async (req, res) => {
       nombre_reto,
       descripcion_reto,
       fecha_inicio,
-      fecha_final,
       condiciones,
       es_temporal
     } = req.body;
+
+    const fechaInicio = fecha_inicio ? new Date(fecha_inicio) : new Date();
+    const fechaFinal = new Date(fechaInicio.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const nuevoReto = await prisma.reto.create({
       data: {
         nombre_reto,
         descripcion_reto,
-        fecha_inicio: fecha_inicio ? new Date(fecha_inicio) : new Date(),
-        fecha_final: fecha_final ? new Date(fecha_final) : null,
+        fecha_inicio: fechaInicio,
+        fecha_final: fechaFinal,
         condiciones: condiciones,
         es_temporal: es_temporal || false,
         estado: "activo"
