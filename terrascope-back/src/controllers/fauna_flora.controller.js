@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
+import { parsePagination, paginateResults } from "../utils/pagination.js";
+
+const FREQUENT_ZONES_CACHE_TTL_MS = 30_000;
+let frequentZonesCache = { data: null, expiresAt: 0, pending: null };
 import pushService from "../services/push-notification.service.js";
 
 // Crear avistamiento
@@ -119,22 +123,38 @@ export const createAvistamiento = async (req, res) => {
 // Obtener todos con filtros opcionales (enriquecidos con métricas sociales)
 export const getAvistamientos = async (req, res) => {
   try {
-    const { especie, categoria, usuarioId, id_usuario } = req.query;
+    const { especie, categoria, usuarioId, id_usuario, buscar } = req.query;
     const currentUserId = req.usuario?.id?.toString() || usuarioId || id_usuario;
+    const pagination = parsePagination(req.query, 100);
+
+    if (!pagination.validCursor) {
+      return res.status(400).json({ message: "El cursor debe ser un ObjectId válido" });
+    }
 
     let filter = {};
     if (especie) filter.especie = especie;
     if (categoria) filter.especie = categoria;
+    if (typeof buscar === "string" && buscar.trim()) {
+      const searchTerm = buscar.trim().slice(0, 100);
+      filter.OR = [
+        { nombre_comun: { contains: searchTerm, mode: "insensitive" } },
+        { nombre_cientifico: { contains: searchTerm, mode: "insensitive" } },
+        { especie: { contains: searchTerm, mode: "insensitive" } },
+      ];
+    }
+    if (pagination.cursor) filter.id = { lt: pagination.cursor };
 
-    const avistamientos = await prisma.faunaFlora.findMany({
+    const records = await prisma.faunaFlora.findMany({
       where: filter,
       orderBy: { id: 'desc' },
+      take: pagination.limit + 1,
       include: {
         usuario: {
           select: { nombre_usuario: true, imagen_perfil: true }
         }
       }
     });
+    const { items: avistamientos } = paginateResults(res, records, pagination.limit);
 
     const formatted = avistamientos.map(item => {
       return {
@@ -275,29 +295,44 @@ export const deleteAvistamiento = async (req, res) => {
 
 export const getFrequentZones = async (req, res) => {
   try {
-    // Prisma mongo raw aggregation
-    const frequentZones = await prisma.faunaFlora.aggregateRaw({
-      pipeline: [
-        {
-          $group: {
-            _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
-            count: { $sum: 1 }
+    if (frequentZonesCache.data && Date.now() < frequentZonesCache.expiresAt) {
+      res.set("Cache-Control", "public, max-age=30");
+      return res.status(200).json(frequentZonesCache.data);
+    }
+
+    if (!frequentZonesCache.pending) {
+      frequentZonesCache.pending = prisma.faunaFlora.aggregateRaw({
+        pipeline: [
+          {
+            $group: {
+              _id: { lat: "$ubicacion.latitud", lng: "$ubicacion.longitud", especie: "$especie" },
+              count: { $sum: 1 }
+            }
+          },
+          { $match: { count: { $gt: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 500 },
+          {
+            $project: {
+              lat: "$_id.lat",
+              lng: "$_id.lng",
+              especie: "$_id.especie",
+              count: 1,
+              _id: 0
+            }
           }
-        },
-        {
-          $match: { count: { $gt: 1 } }
-        },
-        {
-          $project: {
-            lat: "$_id.lat",
-            lng: "$_id.lng",
-            especie: "$_id.especie",
-            count: 1,
-            _id: 0
-          }
-        }
-      ]
-    });
+        ]
+      }).then((data) => {
+        frequentZonesCache.data = data;
+        frequentZonesCache.expiresAt = Date.now() + FREQUENT_ZONES_CACHE_TTL_MS;
+        return data;
+      }).finally(() => {
+        frequentZonesCache.pending = null;
+      });
+    }
+
+    const frequentZones = await frequentZonesCache.pending;
+    res.set("Cache-Control", "public, max-age=30");
     res.status(200).json(frequentZones);
   } catch (error) {
     console.error('❌ Error al obtener zonas frecuentes:', error);
@@ -458,6 +493,11 @@ export const obtenerEstadoValidacion = async (req, res) => {
 export const getFeedAvistamientos = async (req, res) => {
   try {
     const currentUserId = req.usuario?.id?.toString() || req.query.usuarioId || req.query.id_usuario;
+    const pagination = parsePagination(req.query);
+
+    if (!pagination.validCursor) {
+      return res.status(400).json({ message: "El cursor debe ser un ObjectId válido" });
+    }
 
     if (!currentUserId) {
       return res.status(400).json({ message: "Se requiere usuarioId o autenticación para obtener el feed" });
@@ -480,14 +520,17 @@ export const getFeedAvistamientos = async (req, res) => {
     const avistamientos = await prisma.faunaFlora.findMany({
       where: { id_usuario: { in: usuario.seguidos } },
       orderBy: { id: 'desc' },
+      take: pagination.limit + 1,
+      ...(pagination.cursor && { where: { id_usuario: { in: usuario.seguidos }, id: { lt: pagination.cursor } } }),
       include: {
         usuario: {
           select: { nombre_usuario: true, imagen_perfil: true }
         }
       }
     });
+    const { items: pageItems, hasMore, nextCursor } = paginateResults(res, avistamientos, pagination.limit);
 
-    const feed = avistamientos.map((item) => {
+    const feed = pageItems.map((item) => {
       return {
         ...item,
         total_likes: item.likes ? item.likes.length : 0,
@@ -499,7 +542,9 @@ export const getFeedAvistamientos = async (req, res) => {
     res.status(200).json({
       message: "Feed obtenido exitosamente",
       feed,
-      total: feed.length
+      total: feed.length,
+      has_more: hasMore,
+      next_cursor: nextCursor
     });
   } catch (error) {
     console.error("❌ Error al obtener feed de avistamientos:", error);
