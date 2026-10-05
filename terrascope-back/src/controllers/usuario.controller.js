@@ -1,4 +1,5 @@
 import prisma from "../config/db.js";
+import { parsePagination, paginateResults } from "../utils/pagination.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { respondWithError, respondWithControllerError } from "../utils/controller-error.js";
@@ -90,7 +91,15 @@ export const crearUsuario = async (req, res) => {
 // Obtener todos los usuarios
 export const obtenerUsuarios = async (req, res) => {
   try {
-    const usuarios = await prisma.usuario.findMany({
+    const pagination = parsePagination(req.query, 100);
+    if (!pagination.validCursor) {
+      return res.status(400).json({ message: "El cursor debe ser un ObjectId válido" });
+    }
+
+    const records = await prisma.usuario.findMany({
+      where: pagination.cursor ? { id: { lt: pagination.cursor } } : undefined,
+      orderBy: { id: "desc" },
+      take: pagination.limit + 1,
       select: {
         id: true,
         nombre_usuario: true,
@@ -107,6 +116,7 @@ export const obtenerUsuarios = async (req, res) => {
         updatedAt: true
       }
     });
+    const { items: usuarios } = paginateResults(res, records, pagination.limit);
     res.status(200).json(usuarios);
   } catch (error) {
     res.status(500).json({

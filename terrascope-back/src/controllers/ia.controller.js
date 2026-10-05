@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 import { optimizeImage } from "../utils/image-optimizer.js";
 import { hashImage, getFromCache, setInCache, getCacheStats } from "../services/ia-cache.service.js";
+import { generateGeminiContent, GeminiTimeoutError } from "../services/gemini-request.service.js";
 
 dotenv.config();
 
@@ -64,7 +65,7 @@ Devuelve únicamente un JSON válido con este formato:
 Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
 `;
 
-    const result = await model.generateContent([
+    const result = await generateGeminiContent(model, [
       prompt,
       { inlineData: { mimeType, data: imagenOptimizada } }
     ]);
@@ -94,6 +95,9 @@ Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
     });
   } catch (error) {
     console.error("Error IA:", error);
+    if (error instanceof GeminiTimeoutError) {
+      return respondWithError(res, 504, "GEMINI_TIMEOUT", error.message);
+    }
     return respondWithControllerError(res, error, "El servicio de identificación no está disponible", 503);
   }
 };
@@ -142,7 +146,7 @@ Devuelve únicamente un JSON válido:
 }
 `;
 
-    const result = await model.generateContent([prompt]);
+    const result = await generateGeminiContent(model, [prompt]);
     let parsed;
     try {
       parsed = parseJsonResponse(result.response.text());
@@ -158,6 +162,9 @@ Devuelve únicamente un JSON válido:
     return res.status(200).json(parsed);
   } catch (error) {
     console.error("Error en validación IA:", error);
+    if (error instanceof GeminiTimeoutError) {
+      return respondWithError(res, 504, "GEMINI_TIMEOUT", error.message);
+    }
     return respondWithControllerError(res, error, "El servicio de validación no está disponible", 503);
   }
 };
