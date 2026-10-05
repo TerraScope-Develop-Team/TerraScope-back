@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import prisma from "../config/db.js";
 import retosService from "../services/retos.service.js";
 import { parsePagination, paginateResults } from "../utils/pagination.js";
 
 const FREQUENT_ZONES_CACHE_TTL_MS = 30_000;
 let frequentZonesCache = { data: null, expiresAt: 0, pending: null };
+import pushService from "../services/push-notification.service.js";
 
 // Crear avistamiento
 export const createAvistamiento = async (req, res) => {
@@ -88,6 +90,9 @@ export const createAvistamiento = async (req, res) => {
 
     console.log('✅ Avistamiento creado exitosamente:', nuevoAvistamiento.id);
 
+    const notificacionesCercanas =
+      await pushService.notificarAvistamientoCercano(nuevoAvistamiento);
+
     try {
       if (nuevoAvistamiento.id_usuario) {
         await retosService.actualizarHistorial(
@@ -102,7 +107,8 @@ export const createAvistamiento = async (req, res) => {
 
     res.status(201).json({
       message: "Avistamiento creado exitosamente",
-      data: nuevoAvistamiento
+      data: nuevoAvistamiento,
+      notificaciones_cercanas: notificacionesCercanas
     });
 
   } catch (error) {
@@ -253,6 +259,8 @@ export const addComentario = async (req, res) => {
     });
 
     const comentarioCreado = updatedAvistamiento.comentarios[updatedAvistamiento.comentarios.length - 1];
+
+    await pushService.notificarComentario({ avistamiento, comentario: comentarioCreado });
 
     res.status(201).json({
       message: "Comentario agregado exitosamente",
@@ -571,11 +579,20 @@ export const toggleLikeAvistamiento = async (req, res) => {
       data: { likes: updatedLikes }
     });
 
+    const push = yaDioLike
+      ? { enviado: false, motivo: "like_removido" }
+      : await pushService.notificarLike({
+          avistamiento,
+          actorId: userId,
+          eventoId: randomUUID()
+        });
+
     res.status(200).json({
       message: yaDioLike ? "Like removido" : "Like agregado exitosamente",
       liked: !yaDioLike,
       total_likes: updatedAvistamiento.likes.length,
-      avistamientoId: updatedAvistamiento.id
+      avistamientoId: updatedAvistamiento.id,
+      push
     });
   } catch (error) {
     console.error("❌ Error al alternar like:", error);

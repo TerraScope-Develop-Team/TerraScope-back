@@ -9,6 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed": "node seed_habitats.js",
     "perf": "node scripts/measure-api-latency.js"
+    "test": "node --test",
+    "seed": "node seed_habitats.js"
   },
   "prisma": {
     "seed": "node seed_habitats.js"
@@ -24,6 +26,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "firebase-admin": "^14.5.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "moment-timezone": "^0.6.0",

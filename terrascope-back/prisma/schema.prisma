@@ -32,6 +32,9 @@ model Usuario {
   RetosInscritos        Reto[]                 @relation("RetosUsuariosInscritos", fields: [retos_activos], references: [id])
   RetosFinalizados      RetoFinalizado[]
 
+  dispositivos_push     DispositivoPush[]
+  preferencias_push     PreferenciasPush?
+  
   @@map("usuarios")
 }
 
@@ -139,6 +142,51 @@ type Validacion {
   votos_comunidad      Int      @default(0)
   requeridos_comunidad Int      @default(5)
   validado_por_experto Boolean  @default(false)
+}
+
+model DispositivoPush {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  token                 String   @unique
+  plataforma            String?
+  latitud               Float?
+  longitud              Float?
+  precision_ubicacion_m Float?
+  ubicacion_actualizada DateTime?
+  usuario_id            String   @db.ObjectId
+  usuario               Usuario  @relation(fields: [usuario_id], references: [id])
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([usuario_id])
+  @@map("dispositivos_push")
+}
+
+model PreferenciasPush {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+  usuario_id              String   @unique @db.ObjectId
+  usuario                 Usuario  @relation(fields: [usuario_id], references: [id])
+  avistamientos_cercanos  Boolean  @default(true)
+  retos_por_vencer        Boolean  @default(true)
+  actividad_avistamientos Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("preferencias_push")
+}
+
+model EntregaNotificacion {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  clave_unica    String    @unique
+  usuario_id     String    @db.ObjectId
+  tipo           String
+  destino_id     String
+  estado         String    @default("pendiente")
+  enviado_en     DateTime?
+  error          String?
+  createdAt      DateTime  @default(now())
+
+  @@index([usuario_id, tipo])
+  @@map("entregas_notificacion")
 }
 
 model Reto {
