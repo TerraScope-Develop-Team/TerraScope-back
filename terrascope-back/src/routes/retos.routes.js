@@ -50,9 +50,24 @@ router.get("/:id", obtenerRetoById);
  *     tags: [Retos]
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [retoId]
+ *             properties:
+ *               retoId:
+ *                 type: string
+ *                 description: ID MongoDB del reto
  *     responses:
  *       200:
- *         description: Inscripción exitosa
+ *         description: Inscripción confirmada y persistida; usuario derivado del JWT
+ *       401:
+ *         description: Token ausente o usuario no autenticado
+ *       404:
+ *         description: Reto o usuario no encontrado
  */
 router.post("/inscribirse", verificarToken, inscribirseReto);
 
