@@ -385,12 +385,12 @@ class RetosService {
   }
 
   inicializarCron() {
-    cron.schedule("*/1 * * * *", async () => {
-      console.log("🔄 Generando nuevos retos dinámicos (prueba cada minuto)...");
+    cron.schedule("0 * * * *", async () => {
+      console.log("🔄 Generando nuevos retos dinámicos...");
       await this.generarRetosAutomaticos();
     });
 
-    console.log("✅ Cron job para retos configurado (cada minuto, modo de prueba)");
+    console.log("✅ Cron job para retos configurado (cada hora)");
   }
 
 

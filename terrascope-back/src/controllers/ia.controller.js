@@ -3,7 +3,11 @@ import dotenv from "dotenv";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 import { optimizeImage } from "../utils/image-optimizer.js";
 import { hashImage, getFromCache, setInCache, getCacheStats } from "../services/ia-cache.service.js";
-import { generateGeminiContent, GeminiTimeoutError } from "../services/gemini-request.service.js";
+import {
+  generateGeminiContent,
+  generateGeminiContentWithFallback,
+  GeminiTimeoutError,
+} from "../services/gemini-request.service.js";
 import {
   buildIdentificationPrompt,
   buildValidationPrompt,
@@ -60,12 +64,14 @@ export const identificarEspecie = async (req, res) => {
 
     // 4. Llamar a Gemini con la imagen optimizada
     const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
+    const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const prompt = buildIdentificationPrompt();
-
-    const result = await generateGeminiContent(model, [
+    const content = [
       prompt,
-      { inlineData: { mimeType, data: imagenOptimizada } }
-    ]);
+      { inlineData: { mimeType, data: imagenOptimizada } },
+    ];
+
+    const result = await generateGeminiContentWithFallback(model, fallbackModel, content);
 
     let parsed;
     try {
