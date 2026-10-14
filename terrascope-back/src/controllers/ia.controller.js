@@ -3,22 +3,32 @@ import dotenv from "dotenv";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 import { optimizeImage } from "../utils/image-optimizer.js";
 import { hashImage, getFromCache, setInCache, getCacheStats } from "../services/ia-cache.service.js";
-import { generateGeminiContent, GeminiTimeoutError } from "../services/gemini-request.service.js";
+import {
+  generateGeminiContent,
+  generateGeminiContentWithFallback,
+  GeminiTimeoutError,
+} from "../services/gemini-request.service.js";
+import {
+  buildIdentificationPrompt,
+  buildValidationPrompt,
+  fallbackIdentificationResponse,
+  fallbackValidationResponse,
+  parseJsonResponse,
+  validateContextualValidationInput,
+  validateIdentificationInput,
+} from "../services/ia.service.js";
 
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const parseJsonResponse = (text) => JSON.parse(
-  text.replace(/```json/g, "").replace(/```/g, "").trim()
-);
-
 export const identificarEspecie = async (req, res) => {
   try {
-    const { imagen } = req.body;
-
-    if (!imagen) {
-      return respondWithError(res, 400, "IMAGE_REQUIRED", "No se recibió ninguna imagen en base64");
+    let imagen;
+    try {
+      ({ imagen } = validateIdentificationInput(req.body));
+    } catch (error) {
+      return respondWithError(res, 400, "IMAGE_REQUIRED", error.message);
     }
 
     // 1. Calcular hash de la imagen original para caché
@@ -54,32 +64,21 @@ export const identificarEspecie = async (req, res) => {
 
     // 4. Llamar a Gemini con la imagen optimizada
     const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
-    const prompt = `
-Eres un experto en biología y taxonomía. Analiza la imagen y determina la especie del ser vivo que aparece.
-Devuelve únicamente un JSON válido con este formato:
-{
-  "nombre_cientifico": "Nombre científico",
-  "nombre_comun": "Nombre común en español",
-  "nivel_confianza": "Alto | Medio | Bajo"
-}
-Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
-`;
-
-    const result = await generateGeminiContent(model, [
+    const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const prompt = buildIdentificationPrompt();
+    const content = [
       prompt,
-      { inlineData: { mimeType, data: imagenOptimizada } }
-    ]);
+      { inlineData: { mimeType, data: imagenOptimizada } },
+    ];
+
+    const result = await generateGeminiContentWithFallback(model, fallbackModel, content);
 
     let parsed;
     try {
       parsed = parseJsonResponse(result.response.text());
     } catch (error) {
       console.error("Error parseando respuesta de identificación:", error.message);
-      parsed = {
-        nombre_comun: "Desconocido",
-        nombre_cientifico: "Desconocido",
-        nivel_confianza: "Bajo"
-      };
+      parsed = fallbackIdentificationResponse();
     }
 
     // 5. Guardar resultado en caché
@@ -104,6 +103,13 @@ Si no puedes identificar la especie, usa "Desconocido" y nivel "Bajo".
 
 export const validarRegistroFaunaFlora = async (req, res) => {
   try {
+    let payload;
+    try {
+      payload = validateContextualValidationInput(req.body);
+    } catch (error) {
+      return respondWithError(res, 400, "VALIDATION_FIELDS_REQUIRED", error.message);
+    }
+
     const {
       nombre_comun,
       nombre_cientifico,
@@ -112,39 +118,20 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       tipo,
       comportamiento,
       estado_extincion,
-      habitat
-    } = req.body;
-
-    if (!nombre_comun || !nombre_cientifico || !especie || !descripcion || !habitat?.nombre_habitat) {
-      return respondWithError(
-        res,
-        400,
-        "VALIDATION_FIELDS_REQUIRED",
-        "Faltan campos obligatorios para la validación contextual"
-      );
-    }
+      habitat,
+    } = payload;
 
     const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
-    const prompt = `
-Eres un experto en biología y validación de datos ecológicos.
-Analiza si estos datos son coherentes y realistas:
-- Nombre común: ${nombre_comun}
-- Nombre científico: ${nombre_cientifico}
-- Tipo: ${tipo}
-- Especie: ${especie}
-- Descripción: ${descripcion}
-- Comportamiento: ${comportamiento}
-- Estado de extinción: ${estado_extincion}
-- Hábitat: ${habitat.nombre_habitat}
-- Descripción del hábitat: ${habitat.descripcion_habitat || "No especificada"}
-
-Devuelve únicamente un JSON válido:
-{
-  "es_coherente": true,
-  "errores_detectados": [],
-  "sugerencia": "Texto breve"
-}
-`;
+    const prompt = buildValidationPrompt({
+      nombre_comun,
+      nombre_cientifico,
+      tipo,
+      especie,
+      descripcion,
+      comportamiento,
+      estado_extincion,
+      habitat,
+    });
 
     const result = await generateGeminiContent(model, [prompt]);
     let parsed;
@@ -152,11 +139,7 @@ Devuelve únicamente un JSON válido:
       parsed = parseJsonResponse(result.response.text());
     } catch (error) {
       console.error("Error parseando respuesta de validación:", error.message);
-      parsed = {
-        es_coherente: false,
-        errores_detectados: ["No fue posible interpretar la respuesta del modelo"],
-        sugerencia: "Verifica los datos e inténtalo nuevamente"
-      };
+      parsed = fallbackValidationResponse();
     }
 
     return res.status(200).json(parsed);
