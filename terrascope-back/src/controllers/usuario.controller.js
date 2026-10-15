@@ -1,23 +1,24 @@
 import prisma from "../config/db.js";
 import { parsePagination, paginateResults } from "../utils/pagination.js";
-import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { respondWithError, respondWithControllerError } from "../utils/controller-error.js";
-
-const generarToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || "secreto_por_defecto", {
-    expiresIn: process.env.JWT_EXPIRES_IN || "1h",
-  });
-};
+import {
+  buildUserProfileResponse,
+  buildUserUpdateData,
+  generarToken,
+  normalizeLoginPayload,
+  serializeUsuario,
+} from "../services/usuario.service.js";
 
 export const loginUsuario = async (req, res) => {
   try {
-    const { email_usuario, contrasenia_usuario } = req.body;
+    const normalized = normalizeLoginPayload(req.body || {});
 
-    if (!email_usuario || !contrasenia_usuario) {
+    if (!normalized) {
       return res.status(400).json({ message: "Por favor provea email y contraseña" });
     }
 
+    const { email_usuario, contrasenia_usuario } = normalized;
     const usuario = await prisma.usuario.findUnique({
       where: { email_usuario }
     });
@@ -73,12 +74,9 @@ export const crearUsuario = async (req, res) => {
       }
     });
 
-    // Remover contraseña de la respuesta
-    const { contrasenia_usuario: _, ...usuarioResponse } = nuevoUsuario;
-
     res.status(201).json({
       message: "Usuario creado correctamente",
-      data: usuarioResponse
+      data: serializeUsuario(nuevoUsuario)
     });
   } catch (error) {
     res.status(400).json({
@@ -155,16 +153,8 @@ export const obtenerUsuarioPorId = async (req, res) => {
     }
 
     const currentUserId = req.usuario?.id?.toString() || req.user?.id?.toString() || req.query.currentUserId || req.query.id_usuario;
-    const is_following = currentUserId && usuario.seguidores
-      ? usuario.seguidores.includes(currentUserId.toString())
-      : false;
 
-    res.status(200).json({
-      ...usuario,
-      total_seguidores: usuario.seguidores ? usuario.seguidores.length : 0,
-      total_seguidos: usuario.seguidos ? usuario.seguidos.length : 0,
-      is_following
-    });
+    res.status(200).json(buildUserProfileResponse(usuario, currentUserId));
   } catch (error) {
     return respondWithControllerError(res, error, "Error al obtener usuario");
   }
@@ -173,18 +163,7 @@ export const obtenerUsuarioPorId = async (req, res) => {
 // Actualizar un usuario
 export const actualizarUsuario = async (req, res) => {
   try {
-    const { imagen_perfil, contrasenia_usuario, ...otrosDatos } = req.body;
-
-    const updateData = { ...otrosDatos };
-
-    if (imagen_perfil !== undefined && imagen_perfil !== null) {
-      updateData.imagen_perfil = imagen_perfil;
-    }
-
-    if (contrasenia_usuario) {
-      const salt = await bcrypt.genSalt(10);
-      updateData.contrasenia_usuario = await bcrypt.hash(contrasenia_usuario, salt);
-    }
+    const updateData = buildUserUpdateData(req.body || {}, req.body?.contrasenia_usuario ? await bcrypt.hash(req.body.contrasenia_usuario, await bcrypt.genSalt(10)) : undefined);
 
     const usuarioActualizado = await prisma.usuario.update({
       where: { id: req.params.id },

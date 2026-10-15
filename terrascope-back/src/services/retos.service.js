@@ -7,6 +7,305 @@ import { generateGeminiContent } from "./gemini-request.service.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+export const isValidObjectId = (id) =>
+  typeof id === "string" && /^[a-f\d]{24}$/i.test(id);
+
+export const buildTop3Leaderboard = (reto, users = []) => {
+  if (!reto?.usuarios_finalizados?.length) return [];
+
+  const userMap = new Map((users || []).map((user) => [user.id, user]));
+  const top3 = [...reto.usuarios_finalizados]
+    .sort((a, b) => a.posicion - b.posicion)
+    .slice(0, 3)
+    .filter((item) => item.usuario_id && userMap.has(item.usuario_id));
+
+  return top3.map((item) => ({
+    usuario: userMap.get(item.usuario_id) || item.usuario_id,
+    posicion: item.posicion,
+    fecha_completado: item.fecha_completado,
+  }));
+};
+
+export const enrichUserLogros = (logros = [], retos = []) => {
+  const retosById = new Map((retos || []).map((reto) => [reto.id, reto]));
+
+  return (logros || []).map((logro) => ({
+    ...logro,
+    id_reto_base: retosById.get(logro.id_reto_base) || logro.id_reto_base,
+  }));
+};
+
+export const toggleLogroVisibility = (logros = [], logroId) => {
+  const clonedLogros = [...logros];
+  const logroIndex = clonedLogros.findIndex(
+    (logro) => logro.id_reto_base === logroId || logro.nombre_logro === logroId || logro.id === logroId
+  );
+
+  if (logroIndex === -1) {
+    return clonedLogros;
+  }
+
+  clonedLogros[logroIndex] = {
+    ...clonedLogros[logroIndex],
+    es_mostrado: !clonedLogros[logroIndex].es_mostrado,
+  };
+
+  return clonedLogros;
+};
+
+export const buildProgresoReto = ({ usuario, reto }) => {
+  const progreso = {};
+
+  for (const [categoria, valores] of Object.entries(reto?.condiciones || {})) {
+    if (!valores || typeof valores !== "object" || Array.isArray(valores)) continue;
+
+    const valorActual = usuario?.historial?.[categoria] || {};
+
+    const [subcategoria, requerido] = Object.entries(valores)[0] || [];
+    if (!subcategoria || requerido === undefined) continue;
+
+    const actual = Number(valorActual[subcategoria] || 0);
+    progreso[categoria] = {
+      actual,
+      requerido: Number(requerido),
+      porcentaje: Math.min(100, (actual / Number(requerido)) * 100),
+    };
+  }
+
+  return progreso;
+};
+
+export const validateRetoInscripcion = ({ retoId, usuarioId }) => {
+  if (!isValidObjectId(retoId)) {
+    throw new Error('Se requiere un ID de reto válido');
+  }
+
+  if (!isValidObjectId(usuarioId)) {
+    throw new Error('Se requiere un ID de usuario válido');
+  }
+
+  return { retoId, usuarioId };
+};
+
+export const buildRetoManualData = ({
+  nombre_reto,
+  descripcion_reto,
+  fecha_inicio,
+  condiciones,
+  es_temporal,
+}) => {
+  const fechaInicio = fecha_inicio ? new Date(fecha_inicio) : new Date();
+  const fechaFinal = new Date(fechaInicio.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  return {
+    nombre_reto,
+    descripcion_reto,
+    fecha_inicio: fechaInicio,
+    fecha_final: fechaFinal,
+    condiciones,
+    es_temporal: es_temporal || false,
+    estado: 'activo',
+  };
+};
+
+export const buildUserLogrosPayload = ({ usuario, retos = [] }) => ({
+  logros: enrichUserLogros(usuario?.logros || [], retos),
+  historial: usuario?.historial || {},
+});
+
+export const getRetosActivosService = async () => prisma.reto.findMany({
+  where: { estado: 'activo' },
+  orderBy: { createdAt: 'desc' },
+});
+
+export const getRetoByIdService = async ({ retoId }) => prisma.reto.findUnique({
+  where: { id: retoId },
+});
+
+export const inscribirseRetoService = async ({ retoId, usuarioId }) => {
+  const reto = await prisma.reto.findUnique({ where: { id: retoId } });
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+
+  if (!reto || !usuario) {
+    const error = new Error('Reto o usuario no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (reto.estado !== 'activo') {
+    const error = new Error('Este reto no está activo');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const yaInscrito = reto.usuarios_inscritos.includes(usuarioId);
+  let retoActualizado = reto;
+
+  if (!yaInscrito) {
+    retoActualizado = await prisma.reto.update({
+      where: { id: retoId },
+      data: { usuarios_inscritos: { push: usuarioId } },
+    });
+  }
+
+  if (!usuario.retos_activos.includes(retoId)) {
+    await prisma.usuario.update({
+      where: { id: usuarioId },
+      data: { retos_activos: { push: retoId } },
+    });
+  }
+
+  const [retoPersistido, usuarioPersistido] = await Promise.all([
+    prisma.reto.findUnique({
+      where: { id: retoId },
+      select: { id: true, usuarios_inscritos: true },
+    }),
+    prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { id: true, retos_activos: true },
+    }),
+  ]);
+
+  if (!retoPersistido?.usuarios_inscritos.includes(usuarioId) || !usuarioPersistido?.retos_activos.includes(retoId)) {
+    throw new Error('La inscripción no quedó persistida en el reto y el usuario');
+  }
+
+  return {
+    yaInscrito,
+    retoActualizado: {
+      ...retoActualizado,
+      usuarios_inscritos: retoPersistido.usuarios_inscritos,
+    },
+    usuarioId,
+  };
+};
+
+export const desinscribirseRetoService = async ({ retoId, usuarioId }) => {
+  const reto = await prisma.reto.findUnique({ where: { id: retoId } });
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+
+  if (!reto || !usuario) {
+    const error = new Error('Reto o usuario no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await prisma.reto.update({
+    where: { id: retoId },
+    data: {
+      usuarios_inscritos: reto.usuarios_inscritos.filter((id) => id !== usuarioId),
+    },
+  });
+
+  await prisma.usuario.update({
+    where: { id: usuarioId },
+    data: {
+      retos_activos: usuario.retos_activos.filter((id) => id !== retoId),
+    },
+  });
+
+  return { message: 'Desinscripción exitosa' };
+};
+
+export const getTablaPosicionesService = async ({ retoId }) => {
+  const reto = await prisma.reto.findUnique({ where: { id: retoId } });
+
+  if (!reto) {
+    const error = new Error('Reto no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const userIds = (reto.usuarios_finalizados || []).map((t) => t.usuario_id).filter(Boolean);
+  const users = await prisma.usuario.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, nombre_usuario: true, imagen_perfil: true },
+  });
+
+  return {
+    nombre_reto: reto.nombre_reto,
+    top3: buildTop3Leaderboard(reto, users),
+  };
+};
+
+export const getUserLogrosService = async ({ usuarioId }) => {
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+
+  if (!usuario) {
+    const error = new Error('Usuario no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const retosIds = (usuario.logros || []).map((l) => l.id_reto_base).filter(Boolean);
+  const retos = await prisma.reto.findMany({
+    where: { id: { in: retosIds } },
+    select: { id: true, nombre_reto: true, descripcion_reto: true },
+  });
+
+  return {
+    payload: buildUserLogrosPayload({ usuario, retos }),
+    logrosConPopulate: enrichUserLogros(usuario.logros || [], retos),
+  };
+};
+
+export const toggleMostrarLogroService = async ({ usuarioId, logroId }) => {
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+  if (!usuario) {
+    const error = new Error('Usuario no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const logroIndex = usuario.logros.findIndex(
+    (logro) => logro.id_reto_base === logroId || logro.nombre_logro === logroId || logro.id === logroId,
+  );
+
+  if (logroIndex === -1) {
+    const error = new Error('Logro no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const logrosActualizados = toggleLogroVisibility(usuario.logros, logroId);
+
+  await prisma.usuario.update({
+    where: { id: usuarioId },
+    data: { logros: logrosActualizados },
+  });
+
+  return {
+    message: 'Visibilidad del logro actualizada',
+    logro: logrosActualizados[logroIndex],
+  };
+};
+
+export const getProgresoRetoService = async ({ usuarioId, retoId }) => {
+  const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+  const reto = await prisma.reto.findUnique({ where: { id: retoId } });
+
+  if (!usuario || !reto) {
+    const error = new Error('Usuario o reto no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const progreso = buildProgresoReto({ usuario, reto });
+
+  return {
+    reto: {
+      id: reto.id,
+      nombre: reto.nombre_reto,
+      descripcion: reto.descripcion_reto,
+    },
+    progreso,
+  };
+};
+
+export const crearRetoManualService = async (payload) => {
+  const data = buildRetoManualData(payload);
+  return prisma.reto.create({ data });
+};
 
 async function generarNombreDescripcionYCantidadIA(tipo, especie) {
   try {
@@ -80,16 +379,18 @@ function shuffleArray(array) {
 
 class RetosService {
   constructor() {
-    this.inicializarCron();
+    if (process.env.NODE_ENV !== "test") {
+      this.inicializarCron();
+    }
   }
 
   inicializarCron() {
-    cron.schedule("*/1 * * * *", async () => {
-      console.log("🔄 Generando nuevos retos dinámicos (prueba cada minuto)...");
+    cron.schedule("0 * * * *", async () => {
+      console.log("🔄 Generando nuevos retos dinámicos...");
       await this.generarRetosAutomaticos();
     });
 
-    console.log("✅ Cron job para retos configurado (cada minuto, modo de prueba)");
+    console.log("✅ Cron job para retos configurado (cada hora)");
   }
 
 
