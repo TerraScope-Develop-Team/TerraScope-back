@@ -77,7 +77,11 @@ export const createAvistamiento = async (req, res) => {
           const io = req.app.get("io");
           if (io) {
             notifiedUserIds.forEach(uid => {
-              io.to(uid).emit("nuevaAlertaPeligro", alerta);
+              io.to(uid).emit("nuevaAlertaPeligro", {
+                ...alerta,
+                nombre_comun: nuevoAvistamiento.nombre_comun,
+                nombre_cientifico: nuevoAvistamiento.nombre_cientifico,
+              });
             });
           }
         }
