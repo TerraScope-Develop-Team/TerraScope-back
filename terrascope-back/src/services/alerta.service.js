@@ -87,6 +87,25 @@ export const getDangerousFaunaAlertsService = async ({ userId }) => {
     take: 20,
   });
 
+  const avistamientoIds = alertas
+    .map(({ id_avistamiento }) => id_avistamiento)
+    .filter(Boolean);
+
+  let avistamientoMap = new Map();
+  if (avistamientoIds.length > 0) {
+    const avistamientos = await prisma.faunaFlora.findMany({
+      where: { id: { in: avistamientoIds } },
+      select: {
+        id: true,
+        nombre_comun: true,
+        nombre_cientifico: true,
+        especie: true,
+        tipo: true,
+      },
+    });
+    avistamientoMap = new Map(avistamientos.map((a) => [a.id, a]));
+  }
+
   const estados = await prisma.estadoAlertaUsuario.findMany({
     where: {
       id_usuario: userId,
@@ -98,8 +117,17 @@ export const getDangerousFaunaAlertsService = async ({ userId }) => {
     estados.map(({ id_alerta, mostrada, leida }) => [id_alerta, { mostrada, leida }])
   );
 
+  const alertasEnriquecidas = alertas.map((alerta) => {
+    const av = avistamientoMap.get(alerta.id_avistamiento);
+    return {
+      ...alerta,
+      nombre_comun: av?.nombre_comun || null,
+      nombre_cientifico: av?.nombre_cientifico || null,
+    };
+  });
+
   return {
-    alertas: buildAlertSummary(alertas, estadosPorAlerta),
+    alertas: buildAlertSummary(alertasEnriquecidas, estadosPorAlerta),
     total: alertas.length,
   };
 };
@@ -213,7 +241,11 @@ export const getNearbyDangerousAlertsService = async ({ userId, latitude, longit
       }
     }
 
-    alertas.push(alerta);
+    alertas.push({
+      ...alerta,
+      nombre_comun: avistamiento.nombre_comun || null,
+      nombre_cientifico: avistamiento.nombre_cientifico || null,
+    });
   }
 
   return { alertas, total: alertas.length };
