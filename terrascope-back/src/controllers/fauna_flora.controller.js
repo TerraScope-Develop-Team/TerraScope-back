@@ -9,6 +9,7 @@ import {
   deleteComentarioService,
   formatAvistamientoMetrics,
   getAvistamientoByIdService,
+  getAvistamientoRecommendationsService,
   getFeedAvistamientosService,
   listFaunaFloraService,
   obtenerEstadoValidacionService,
@@ -152,6 +153,23 @@ export const getAvistamientos = async (req, res) => {
     res.status(500).json({
       message: "Error al conseguir los avistamientos",
       error: error.message
+    });
+  }
+};
+
+export const getAvistamientoRecommendations = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({ message: 'El identificador de avistamiento no es válido' });
+    }
+
+    const result = await getAvistamientoRecommendationsService({ avistamientoId: id });
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error al obtener recomendaciones de avistamientos:', error);
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Error al obtener recomendaciones',
     });
   }
 };

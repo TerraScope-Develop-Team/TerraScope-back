@@ -5,6 +5,7 @@ import {
   buildComentarioPayload,
   buildFaunaFloraFilter,
   formatAvistamientoMetrics,
+  selectAvistamientoRecommendations,
   validateFaunaFloraInput,
 } from '../src/services/fauna_flora.service.js';
 
@@ -62,6 +63,69 @@ test('formatAvistamientoMetrics agrega contadores sociales', () => {
   assert.equal(formatted.total_likes, 2);
   assert.equal(formatted.total_comentarios, 3);
   assert.equal(formatted.user_has_liked, true);
+});
+
+test('selectAvistamientoRecommendations incluye avistamientos dentro de un kilómetro', () => {
+  const origin = {
+    id: 'origin',
+    especie: 'Jaguar',
+    ubicacion: { latitud: 19.4, longitud: -99.1 },
+  };
+  const candidates = [
+    {
+      id: 'within-radius',
+      especie: 'Pino',
+      ubicacion: { latitud: 19.408, longitud: -99.1 },
+    },
+    {
+      id: 'outside-radius',
+      especie: 'Pino',
+      ubicacion: { latitud: 19.41, longitud: -99.1 },
+    },
+    {
+      id: 'near',
+      especie: 'Pino',
+      ubicacion: { latitud: 19.4001, longitud: -99.1 },
+    },
+    {
+      ...origin,
+    },
+  ];
+
+  const result = selectAvistamientoRecommendations(origin, candidates);
+
+  assert.equal(result.criterio, 'cercania');
+  assert.equal(result.recomendaciones[0].id, 'near');
+  assert.deepEqual(
+    result.recomendaciones.map(({ id }) => id),
+    ['near', 'within-radius'],
+  );
+  assert.equal(Math.round(result.recomendaciones[0].distanceMeters), 11);
+});
+
+test('selectAvistamientoRecommendations usa la especie cuando no hay cercanos', () => {
+  const origin = {
+    id: 'origin',
+    especie: 'Jaguar',
+    ubicacion: { latitud: 19.4, longitud: -99.1 },
+  };
+  const candidates = [
+    {
+      id: 'same-species',
+      especie: 'Jaguar',
+      ubicacion: { latitud: 19.5, longitud: -99.1 },
+    },
+    {
+      id: 'other-species',
+      especie: 'Pino',
+      ubicacion: { latitud: 19.5, longitud: -99.1 },
+    },
+  ];
+
+  assert.deepEqual(selectAvistamientoRecommendations(origin, candidates), {
+    criterio: 'especie',
+    recomendaciones: [{ id: 'same-species', distanceMeters: null }],
+  });
 });
 
 test('buildComentarioPayload normaliza un comentario válido', () => {
