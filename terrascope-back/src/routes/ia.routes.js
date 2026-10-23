@@ -1,6 +1,7 @@
 import express from "express";
 import { identificarEspecie, validarRegistroFaunaFlora, getIaStats } from "../controllers/ia.controller.js";
 import { verificarToken } from "../middlewares/auth.middleware.js";
+import { iaRateLimiter } from "../middlewares/rate-limit.middleware.js";
 
 const router = express.Router();
 
@@ -15,8 +16,10 @@ const router = express.Router();
  *     responses:
  *       200:
  *         description: Especie identificada.
+ *       429:
+ *         description: Límite de solicitudes de IA excedido (10 por minuto). Incluye encabezado Retry-After.
  */
-router.post("/identificar", verificarToken, identificarEspecie);
+router.post("/identificar", verificarToken, iaRateLimiter, identificarEspecie);
 
 /**
  * @swagger
@@ -29,8 +32,10 @@ router.post("/identificar", verificarToken, identificarEspecie);
  *     responses:
  *       200:
  *         description: Registro validado.
+ *       429:
+ *         description: Límite de solicitudes de IA excedido. Incluye encabezado Retry-After.
  */
-router.post("/validar-registro", verificarToken, validarRegistroFaunaFlora);
+router.post("/validar-registro", verificarToken, iaRateLimiter, validarRegistroFaunaFlora);
 
 /**
  * @swagger
