@@ -5,6 +5,7 @@ import {
   createAvistamiento,
   getAvistamientos,
   getAvistamientoById,
+  getAvistamientoRecommendations,
   deleteAvistamiento,
   addComentario,
   getFrequentZones,
@@ -83,6 +84,26 @@ router.post("/procesar-votaciones", verificarToken, procesarVotacionesVencidas);
  */
 router.post("/", verificarToken, createAvistamiento);
 router.get("/", getAvistamientos);
+
+/**
+ * @swagger
+ * /fauna-flora/{id}/recomendados:
+ *   get:
+ *     summary: Obtener avistamientos cercanos o de la misma especie
+ *     tags: [Fauna y Flora]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Recomendaciones por cercanía o por especie si no hay avistamientos en 1 kilómetro
+ *       404:
+ *         description: Avistamiento origen no encontrado
+ */
+router.get("/:id/recomendados", getAvistamientoRecommendations);
 
 /**
  * @swagger

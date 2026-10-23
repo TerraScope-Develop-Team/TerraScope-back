@@ -1,4 +1,8 @@
 import prisma from '../config/db.js';
+import { distanceInMeters } from '../utils/geo.js';
+
+export const AVISTAMIENTO_RECOMMENDATION_RADIUS_METERS = 1_000;
+export const AVISTAMIENTO_RECOMMENDATION_LIMIT = 5;
 
 const DEFAULT_VOTING_PERIOD_HOURS = 24;
 
@@ -389,6 +393,89 @@ export async function listFaunaFloraService({ filter, limit = 100, currentUserId
   });
 
   return records.map((item) => formatAvistamientoMetrics(item, currentUserId));
+}
+
+export function selectAvistamientoRecommendations(
+  origin,
+  candidates,
+  radiusMeters = AVISTAMIENTO_RECOMMENDATION_RADIUS_METERS,
+  limit = AVISTAMIENTO_RECOMMENDATION_LIMIT,
+) {
+  const eligibleCandidates = candidates.filter(({ id }) => id !== origin.id);
+  const nearby = eligibleCandidates
+    .map((avistamiento) => ({
+      id: avistamiento.id,
+      distanceMeters: distanceInMeters(
+        origin.ubicacion?.latitud,
+        origin.ubicacion?.longitud,
+        avistamiento.ubicacion?.latitud,
+        avistamiento.ubicacion?.longitud,
+      ),
+    }))
+    .filter(({ distanceMeters }) => distanceMeters <= radiusMeters)
+    .sort((first, second) => first.distanceMeters - second.distanceMeters)
+    .slice(0, limit);
+
+  if (nearby.length > 0) {
+    return { criterio: 'cercania', recomendaciones: nearby };
+  }
+
+  const sameSpecies = eligibleCandidates
+    .filter(({ especie }) => especie === origin.especie)
+    .slice(0, limit)
+    .map(({ id }) => ({ id, distanceMeters: null }));
+
+  return { criterio: 'especie', recomendaciones: sameSpecies };
+}
+
+export async function getAvistamientoRecommendationsService({ avistamientoId }) {
+  const origin = await prisma.faunaFlora.findUnique({
+    where: { id: avistamientoId },
+    select: { id: true, especie: true, ubicacion: true },
+  });
+
+  if (!origin) {
+    const error = new Error('Avistamiento no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const candidates = await prisma.faunaFlora.findMany({
+    where: { id: { not: avistamientoId } },
+    orderBy: { id: 'desc' },
+    select: { id: true, especie: true, ubicacion: true },
+  });
+  const selection = selectAvistamientoRecommendations(origin, candidates);
+
+  if (selection.recomendaciones.length === 0) {
+    return {
+      criterio: selection.criterio,
+      radio_metros: AVISTAMIENTO_RECOMMENDATION_RADIUS_METERS,
+      recomendaciones: [],
+    };
+  }
+
+  const records = await prisma.faunaFlora.findMany({
+    where: { id: { in: selection.recomendaciones.map(({ id }) => id) } },
+    include: {
+      usuario: { select: { nombre_usuario: true, imagen_perfil: true } },
+    },
+  });
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+
+  return {
+    criterio: selection.criterio,
+    radio_metros: AVISTAMIENTO_RECOMMENDATION_RADIUS_METERS,
+    recomendaciones: selection.recomendaciones.flatMap(({ id, distanceMeters }) => {
+      const record = recordsById.get(id);
+      if (!record) return [];
+
+      return [{
+        ...formatAvistamientoMetrics(record),
+        distancia_metros: distanceMeters === null ? null : Math.round(distanceMeters),
+      }];
+    }),
+  };
 }
 
 export async function createFaunaFloraService(input) {
