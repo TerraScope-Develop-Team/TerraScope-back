@@ -12,6 +12,7 @@ import {
   votarValidacion,
   validarPorExperto,
   obtenerEstadoValidacion,
+  procesarVotacionesVencidas,
   getFeedAvistamientos,
   toggleLikeAvistamiento,
   deleteComentario,
@@ -48,6 +49,20 @@ router.get("/feed", verificarToken, getFeedAvistamientos);
  *         description: Lista de zonas frecuentes
  */
 router.get("/frequent-zones", getFrequentZones);
+
+/**
+ * @swagger
+ * /fauna-flora/procesar-votaciones:
+ *   post:
+ *     summary: Evaluar y limpiar avistamientos con periodo de votación vencido
+ *     tags: [Fauna y Flora]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Votaciones vencidas procesadas
+ */
+router.post("/procesar-votaciones", verificarToken, procesarVotacionesVencidas);
 
 /**
  * @swagger
@@ -123,7 +138,7 @@ router.delete("/:id", verificarToken, deleteAvistamiento);
  * @swagger
  * /fauna-flora/{id}/votar:
  *   put:
- *     summary: Votar validación
+ *     summary: Votar validación (positivo o negativo)
  *     tags: [Fauna y Flora]
  *     security:
  *       - bearerAuth: []
@@ -133,7 +148,7 @@ router.delete("/:id", verificarToken, deleteAvistamiento);
  *         required: true
  *     responses:
  *       200:
- *         description: Voto registrado
+ *         description: Voto registrado o avistamiento eliminado por mayoría negativa
  */
 router.put("/:id/votar", verificarToken, votarValidacion);
 
