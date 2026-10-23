@@ -116,6 +116,7 @@ model FaunaFlora {
   // Many-to-many para validadores
   usuarios_validadores_ids String[]  @db.ObjectId
   usuarios_validadores     Usuario[] @relation("Validadores", fields: [usuarios_validadores_ids], references: [id])
+  createdAt                DateTime? @default(now())
 
   @@index([especie])
   @@index([id_usuario, id])
@@ -143,10 +144,16 @@ type FaunaFloraComentario {
 }
 
 type Validacion {
-  estado               String   @default("pendiente")
-  votos_comunidad      Int      @default(0)
-  requeridos_comunidad Int      @default(5)
-  validado_por_experto Boolean  @default(false)
+  estado                String    @default("pendiente")
+  votos_comunidad       Int       @default(0)
+  votos_positivos       Int       @default(0)
+  votos_negativos       Int       @default(0)
+  requeridos_comunidad  Int       @default(5)
+  validado_por_experto  Boolean   @default(false)
+  usuarios_positivos    String[]
+  usuarios_negativos    String[]
+  fecha_inicio_votacion DateTime?
+  fecha_fin_votacion    DateTime?
 }
 
 model DispositivoPush {

@@ -12,6 +12,7 @@ import {
   getFeedAvistamientosService,
   listFaunaFloraService,
   obtenerEstadoValidacionService,
+  procesarVotacionesVencidasService,
   toggleLikeAvistamientoService,
   validarPorExpertoService,
   validateFaunaFloraInput,
@@ -278,32 +279,88 @@ export const getFrequentZones = async (req, res) => {
   }
 };
 
-// Votar por comunidad
+// Votar por comunidad (positivo o negativo)
 export const votarValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
     const id_usuario = req.usuario?.id || req.user?.id || req.body?.id_usuario;
+    const tipoVoto =
+      req.body?.tipo_voto ??
+      req.body?.tipoVoto ??
+      req.body?.voto ??
+      req.query?.tipo_voto ??
+      "positivo";
 
     if (!id_usuario) {
       return res.status(400).json({ message: "Se requiere el id_usuario" });
     }
 
-    const updatedAvistamiento = await votarValidacionService({
+    const resultado = await votarValidacionService({
       avistamientoId,
       userId: id_usuario,
+      tipoVoto,
     });
+
+    if (resultado.eliminado) {
+      const io = req.app?.get("io");
+      if (io) {
+        io.emit("avistamientoEliminado", {
+          id: avistamientoId,
+          motivo: resultado.motivo,
+        });
+      }
+
+      return res.status(200).json({
+        message:
+          resultado.motivo === "sin_votos"
+            ? "El periodo de votación finalizó sin votos y el avistamiento fue eliminado automáticamente"
+            : "El avistamiento alcanzó mayoría de votos negativos y fue eliminado automáticamente",
+        eliminado: true,
+        vencido: !!resultado.vencido,
+        motivo: resultado.motivo,
+        tipo_voto: resultado.tipo_voto || null,
+        estado_actual: "eliminado",
+        votos_comunidad: resultado.votos_comunidad,
+        votos_positivos: resultado.votos_positivos,
+        votos_negativos: resultado.votos_negativos,
+        requeridos_comunidad: resultado.requeridos_comunidad,
+      });
+    }
+
+    if (resultado.vencido) {
+      return res.status(200).json({
+        message:
+          "El periodo de votación concluyó con mayoría positiva y el avistamiento quedó validado por la comunidad",
+        eliminado: false,
+        vencido: true,
+        motivo: resultado.motivo,
+        estado_actual: resultado.estado_actual,
+        votos_comunidad: resultado.votos_comunidad,
+        votos_positivos: resultado.votos_positivos,
+        votos_negativos: resultado.votos_negativos,
+        requeridos_comunidad: resultado.requeridos_comunidad,
+      });
+    }
 
     res.status(200).json({
       message: "Voto registrado correctamente",
-      estado_actual: updatedAvistamiento.validacion.estado,
-      votos_comunidad: updatedAvistamiento.validacion.votos_comunidad,
+      eliminado: false,
+      vencido: false,
+      tipo_voto: resultado.tipo_voto,
+      estado_actual: resultado.validacion.estado,
+      votos_comunidad: resultado.validacion.votos_comunidad,
+      votos_positivos: resultado.validacion.votos_positivos,
+      votos_negativos: resultado.validacion.votos_negativos,
+      requeridos_comunidad: resultado.validacion.requeridos_comunidad,
+      fecha_inicio_votacion: resultado.validacion.fecha_inicio_votacion,
+      fecha_fin_votacion: resultado.validacion.fecha_fin_votacion,
     });
   } catch (error) {
-    console.error('❌ Error al registrar voto:', error);
+    console.error("❌ Error al registrar voto:", error);
     const status = error.statusCode || 500;
     res.status(status).json({
       message: error.message || "Error al registrar el voto",
-      error: error.message || "Error al registrar el voto"
+      error: error.message || "Error al registrar el voto",
     });
   }
 };
@@ -324,13 +381,16 @@ export const validarPorExperto = async (req, res) => {
     res.status(200).json({
       message: "Avistamiento validado por experto",
       estado_actual: updatedAvistamiento.validacion.estado,
+      votos_comunidad: updatedAvistamiento.validacion.votos_comunidad,
+      votos_positivos: updatedAvistamiento.validacion.votos_positivos,
+      votos_negativos: updatedAvistamiento.validacion.votos_negativos,
     });
   } catch (error) {
-    console.error('❌ Error al validar por experto:', error);
+    console.error("❌ Error al validar por experto:", error);
     const status = error.statusCode || 500;
     res.status(status).json({
       message: error.message || "Error al validar por experto",
-      error: error.message || "Error al validar por experto"
+      error: error.message || "Error al validar por experto",
     });
   }
 };
@@ -338,17 +398,36 @@ export const validarPorExperto = async (req, res) => {
 export const obtenerEstadoValidacion = async (req, res) => {
   try {
     const avistamientoId = req.params.id;
-    const userId = req.usuario?.id || req.query.userId || req.body.id_usuario;
+    const userId = req.usuario?.id || req.query?.userId || req.body?.id_usuario;
 
-    if (!userId) return res.status(400).json({ message: 'Falta el userId' });
+    if (!userId) return res.status(400).json({ message: "Falta el userId" });
 
     const estado = await obtenerEstadoValidacionService({ avistamientoId, userId });
 
     res.status(200).json(estado);
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error("❌ Error:", error);
     const status = error.statusCode || 500;
-    res.status(status).json({ message: error.message || "Error al obtener estado", error: error.message || "Error al obtener estado" });
+    res.status(status).json({
+      message: error.message || "Error al obtener estado",
+      error: error.message || "Error al obtener estado",
+    });
+  }
+};
+
+export const procesarVotacionesVencidas = async (req, res) => {
+  try {
+    const resultado = await procesarVotacionesVencidasService();
+    res.status(200).json({
+      message: "Votaciones vencidas procesadas correctamente",
+      ...resultado,
+    });
+  } catch (error) {
+    console.error("❌ Error al procesar votaciones vencidas:", error);
+    res.status(500).json({
+      message: "Error al procesar votaciones vencidas",
+      error: error.message,
+    });
   }
 };
 
