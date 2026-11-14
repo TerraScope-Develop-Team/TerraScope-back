@@ -56,15 +56,30 @@ export const toggleLogroVisibility = (logros = [], logroId) => {
 export const buildProgresoReto = ({ usuario, reto }) => {
   const progreso = {};
 
+  // Normaliza un string quitando acentos/diacríticos (igual que actualizarHistorial)
+  const normalizeKey = (str) =>
+    str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Snapshot del historial al momento de inscribirse (puede no existir para inscripciones antiguas)
+  const baseSnapshot = reto.historial_base?.[usuario.id] || {};
+
   for (const [categoria, valores] of Object.entries(reto?.condiciones || {})) {
     if (!valores || typeof valores !== "object" || Array.isArray(valores)) continue;
 
     const valorActual = usuario?.historial?.[categoria] || {};
+    const valorBase   = baseSnapshot[categoria] || {};
 
     const [subcategoria, requerido] = Object.entries(valores)[0] || [];
     if (!subcategoria || requerido === undefined) continue;
 
-    const actual = Number(valorActual[subcategoria] || 0);
+    // Normalizar la subcategoría para que coincida con las claves del historial
+    const subcategoriaNorm = normalizeKey(subcategoria);
+
+    // Delta: avistamientos hechos DESPUÉS de inscribirse
+    const totalActual = Number(valorActual[subcategoriaNorm] || 0);
+    const baseline    = Number(valorBase[subcategoriaNorm]   || 0);
+    const actual      = Math.max(0, totalActual - baseline);
+
     progreso[categoria] = {
       actual,
       requerido: Number(requerido),
@@ -142,9 +157,19 @@ export const inscribirseRetoService = async ({ retoId, usuarioId }) => {
   let retoActualizado = reto;
 
   if (!yaInscrito) {
+    // Guardar snapshot del historial actual del usuario como punto de partida
+    const historialBase = reto.historial_base || {};
+    historialBase[usuarioId] = {
+      fauna: { ...(usuario.historial?.fauna || {}) },
+      flora: { ...(usuario.historial?.flora || {}) },
+    };
+
     retoActualizado = await prisma.reto.update({
       where: { id: retoId },
-      data: { usuarios_inscritos: { push: usuarioId } },
+      data: {
+        usuarios_inscritos: { push: usuarioId },
+        historial_base: historialBase,
+      },
     });
   }
 
@@ -663,16 +688,28 @@ class RetosService {
         return result;
       };
 
+      // Normaliza un string quitando acentos/diacríticos (igual que actualizarHistorial)
+      const normalizeKey = (str) =>
+        str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      // Snapshot del historial al momento de inscribirse
+      const baseSnapshot = reto.historial_base?.[usuario.id] || {};
+
       const condiciones = flattenObj(reto.condiciones);
 
       for (const [key, valorRequerido] of Object.entries(condiciones)) {
         console.log(`\n🔍 Verificando condición: ${key} >= ${valorRequerido}`);
         
         const [categoria, subcategoria] = key.split(".");
+
+        // Normalizar la subcategoría de la condición para que coincida con el historial
+        const subcategoriaNorm = normalizeKey(subcategoria);
+
+        const totalActual = usuario.historial?.[categoria]?.[subcategoriaNorm] || 0;
+        const baseline    = Number(baseSnapshot[categoria]?.[subcategoriaNorm] || 0);
+        const valorUsuario = Math.max(0, totalActual - baseline);
         
-        const valorUsuario = usuario.historial?.[categoria]?.[subcategoria] || 0;
-        
-        console.log(`  📈 Valor usuario: ${valorUsuario}`);
+        console.log(`  📈 Valor desde inscripción: ${valorUsuario} (total: ${totalActual}, base: ${baseline}, clave: "${subcategoriaNorm}")`);
         console.log(`  🎯 Valor requerido: ${valorRequerido}`);
         
         if (valorUsuario < valorRequerido) {
