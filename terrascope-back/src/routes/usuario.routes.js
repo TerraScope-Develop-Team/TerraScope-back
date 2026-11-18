@@ -14,6 +14,7 @@ import {
   obtenerSeguidos
 } from "../controllers/usuario.controller.js";
 import { verificarToken } from "../middlewares/auth.middleware.js";
+import { loginRateLimiter } from "../middlewares/rate-limit.middleware.js";
 
 const router = Router();
 
@@ -40,8 +41,10 @@ const router = Router();
  *         description: Login exitoso. Devuelve los datos del usuario y el token JWT.
  *       401:
  *         description: Credenciales inválidas.
+ *       429:
+ *         description: Demasiados intentos de inicio de sesión (Rate Limit). Incluye encabezado Retry-After.
  */
-router.post("/login", loginUsuario);
+router.post("/login", loginRateLimiter, loginUsuario);
 /**
  * @swagger
  * /usuarios:

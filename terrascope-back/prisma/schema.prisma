@@ -211,6 +211,9 @@ model Reto {
   usuarios_inscritos   String[]           @db.ObjectId
   usuarios             Usuario[]          @relation("RetosUsuariosInscritos", fields: [usuarios_inscritos], references: [id])
   usuarios_finalizados RetoFinalizado[]
+  /// Snapshot del historial de cada usuario al momento de inscribirse.
+  /// Formato: { "<userId>": { fauna: { Mamifero: N, ... }, flora: { ... } } }
+  historial_base       Json?
   estado               String             @default("activo")
   es_temporal          Boolean            @default(false)
   createdAt            DateTime           @default(now())
