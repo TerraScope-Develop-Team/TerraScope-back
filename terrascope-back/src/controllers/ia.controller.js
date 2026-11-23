@@ -2,11 +2,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 import { respondWithControllerError, respondWithError } from "../utils/controller-error.js";
 import { optimizeImage } from "../utils/image-optimizer.js";
-import { hashImage, getFromCache, setInCache, getCacheStats } from "../services/ia-cache.service.js";
 import {
-  generateGeminiContent,
+  hashImage,
+  hashValidationPayload,
+  getFromCache,
+  setInCache,
+  getCacheStats,
+} from "../services/ia-cache.service.js";
+import {
+  createGeminiModelPair,
   generateGeminiContentWithFallback,
   GeminiTimeoutError,
+  GeminiRateLimitError,
+  isGeminiRateLimitError,
 } from "../services/gemini-request.service.js";
 import {
   buildIdentificationPrompt,
@@ -21,6 +29,19 @@ import {
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+function handleIaControllerError(res, error, defaultMessage) {
+  if (error instanceof GeminiTimeoutError) {
+    return respondWithError(res, 504, "GEMINI_TIMEOUT", error.message);
+  }
+  if (error instanceof GeminiRateLimitError || isGeminiRateLimitError(error)) {
+    const message = error instanceof GeminiRateLimitError
+      ? error.message
+      : "El servicio de IA alcanzó temporalmente su límite de solicitudes. Inténtalo nuevamente en un minuto.";
+    return respondWithError(res, 429, "GEMINI_RATE_LIMIT", message);
+  }
+  return respondWithControllerError(res, error, defaultMessage, 503);
+}
 
 export const identificarEspecie = async (req, res) => {
   try {
@@ -63,15 +84,14 @@ export const identificarEspecie = async (req, res) => {
     }
 
     // 4. Llamar a Gemini con la imagen optimizada
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
-    const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const { primaryModel, fallbackModel } = createGeminiModelPair(genAI);
     const prompt = buildIdentificationPrompt();
     const content = [
       prompt,
       { inlineData: { mimeType, data: imagenOptimizada } },
     ];
 
-    const result = await generateGeminiContentWithFallback(model, fallbackModel, content);
+    const result = await generateGeminiContentWithFallback(primaryModel, fallbackModel, content);
 
     let parsed;
     try {
@@ -94,10 +114,7 @@ export const identificarEspecie = async (req, res) => {
     });
   } catch (error) {
     console.error("Error IA:", error);
-    if (error instanceof GeminiTimeoutError) {
-      return respondWithError(res, 504, "GEMINI_TIMEOUT", error.message);
-    }
-    return respondWithControllerError(res, error, "El servicio de identificación no está disponible", 503);
+    return handleIaControllerError(res, error, "El servicio de identificación no está disponible");
   }
 };
 
@@ -108,6 +125,13 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       payload = validateContextualValidationInput(req.body);
     } catch (error) {
       return respondWithError(res, 400, "VALIDATION_FIELDS_REQUIRED", error.message);
+    }
+
+    const validationHash = hashValidationPayload(payload);
+    const cached = getFromCache(validationHash);
+    if (cached) {
+      console.log(`[IA] Validación desde caché para hash ${validationHash.slice(0, 19)}...`);
+      return res.status(200).json({ ...cached, cache_hit: true });
     }
 
     const {
@@ -121,7 +145,7 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       habitat,
     } = payload;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
+    const { primaryModel, fallbackModel } = createGeminiModelPair(genAI);
     const prompt = buildValidationPrompt({
       nombre_comun,
       nombre_cientifico,
@@ -133,22 +157,25 @@ export const validarRegistroFaunaFlora = async (req, res) => {
       habitat,
     });
 
-    const result = await generateGeminiContent(model, [prompt]);
+    const result = await generateGeminiContentWithFallback(primaryModel, fallbackModel, [prompt]);
     let parsed;
+    let usedFallbackResponse = false;
     try {
       parsed = parseJsonResponse(result.response.text());
     } catch (error) {
       console.error("Error parseando respuesta de validación:", error.message);
       parsed = fallbackValidationResponse();
+      usedFallbackResponse = true;
     }
 
-    return res.status(200).json(parsed);
+    if (!usedFallbackResponse) {
+      setInCache(validationHash, parsed);
+    }
+
+    return res.status(200).json({ ...parsed, cache_hit: false });
   } catch (error) {
     console.error("Error en validación IA:", error);
-    if (error instanceof GeminiTimeoutError) {
-      return respondWithError(res, 504, "GEMINI_TIMEOUT", error.message);
-    }
-    return respondWithControllerError(res, error, "El servicio de validación no está disponible", 503);
+    return handleIaControllerError(res, error, "El servicio de validación no está disponible");
   }
 };
 

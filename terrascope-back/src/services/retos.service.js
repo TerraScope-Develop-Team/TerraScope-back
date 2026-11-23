@@ -3,7 +3,7 @@ import observerService from "./observer.service.js";
 import cron from "node-cron";
 import moment from "moment-timezone";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { generateGeminiContent } from "./gemini-request.service.js";
+import { createGeminiModelPair, generateGeminiContentWithFallback } from "./gemini-request.service.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -334,9 +334,7 @@ export const crearRetoManualService = async (payload) => {
 
 async function generarNombreDescripcionYCantidadIA(tipo, especie) {
   try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
-    });
+    const { primaryModel, fallbackModel } = createGeminiModelPair(genAI);
 
    const prompt = `
 Eres un generador experto de desafíos ecológicos para una aplicación móvil.
@@ -372,7 +370,7 @@ Devuelve únicamente un JSON válido:
 `;
 
 
-    const res = await generateGeminiContent(model, [prompt]);
+    const res = await generateGeminiContentWithFallback(primaryModel, fallbackModel, [prompt]);
     const raw = res.response.text().trim();
 
     const clean = raw
@@ -410,12 +408,18 @@ class RetosService {
   }
 
   inicializarCron() {
-    cron.schedule("0 * * * *", async () => {
+    if (process.env.ENABLE_RETOS_CRON === "false") {
+      console.log("⏸️ Cron job para retos desactivado (ENABLE_RETOS_CRON=false)");
+      return;
+    }
+
+    const schedule = process.env.RETOS_CRON_SCHEDULE || "0 */6 * * *";
+    cron.schedule(schedule, async () => {
       console.log("🔄 Generando nuevos retos dinámicos...");
       await this.generarRetosAutomaticos();
     });
 
-    console.log("✅ Cron job para retos configurado (cada hora)");
+    console.log(`✅ Cron job para retos configurado (${schedule})`);
   }
 
 

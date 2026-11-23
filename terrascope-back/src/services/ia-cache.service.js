@@ -24,6 +24,35 @@ export function hashImage(base64) {
 }
 
 /**
+ * Genera un hash SHA-256 normalizado del payload de validación contextual.
+ *
+ * @param {object} payload - Datos normalizados de fauna/flora y hábitat
+ * @returns {string} Hash hexadecimal con prefijo validation:
+ */
+export function hashValidationPayload(payload = {}) {
+  const normalize = (value) => (value == null ? "" : String(value).trim().toLowerCase());
+
+  const normalized = {
+    nombre_comun: normalize(payload.nombre_comun),
+    nombre_cientifico: normalize(payload.nombre_cientifico),
+    tipo: normalize(payload.tipo),
+    especie: normalize(payload.especie),
+    descripcion: normalize(payload.descripcion),
+    comportamiento: normalize(payload.comportamiento),
+    estado_extincion: normalize(payload.estado_extincion),
+    habitat_nombre: normalize(payload.habitat?.nombre_habitat ?? payload.habitat_nombre),
+    habitat_descripcion: normalize(payload.habitat?.descripcion_habitat ?? payload.habitat_descripcion),
+  };
+
+  const digest = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(normalized))
+    .digest("hex");
+
+  return `validation:${digest}`;
+}
+
+/**
  * Consulta el caché por hash de imagen.
  *
  * @param {string} hash
